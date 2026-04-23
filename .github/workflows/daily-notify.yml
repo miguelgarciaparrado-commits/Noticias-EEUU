@@ -1,0 +1,27 @@
+name: Daily Economic Calendar WhatsApp
+
+on:
+  schedule:
+    - cron: '0 6 * * 1-5'
+    - cron: '0 7 * * 1-5'
+  workflow_dispatch:
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Send daily notification
+        env:
+          WA_PHONE: ${{ secrets.WA_PHONE }}
+          WA_APIKEY: ${{ secrets.WA_APIKEY }}
+          GITHUB_EVENT_NAME: ${{ github.event_name }}
+        run: python fetch_and_notify.py
