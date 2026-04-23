@@ -1,0 +1,30 @@
+name: Daily Economic Calendar WhatsApp
+
+on:
+  schedule:
+    # GitHub Actions cron runs in UTC. Madrid has DST (CET=UTC+1 winter, CEST=UTC+2 summer).
+    # We run BOTH crons year-round and let the Python script verify the local hour == 08.
+    # GHA delays cron ~5-15 min typically; the hour check tolerates this naturally.
+    - cron: '0 6 * * 1-5'   # 08:00 CEST (summer) / 07:00 CET (winter, skipped by script)
+    - cron: '0 7 * * 1-5'   # 09:00 CEST (summer, skipped) / 08:00 CET (winter)
+  workflow_dispatch:         # Manual trigger button (bypasses time check)
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Send daily notification
+        env:
+          WA_PHONE: ${{ secrets.WA_PHONE }}
+          WA_APIKEY: ${{ secrets.WA_APIKEY }}
+          GITHUB_EVENT_NAME: ${{ github.event_name }}
+        run: python fetch_and_notify.py
