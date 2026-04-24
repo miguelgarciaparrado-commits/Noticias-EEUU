@@ -349,7 +349,7 @@
         </div>
       </div>
       <div class="form-group"><label class="form-label">Nivel RSI</label>
-        <div class="slider-wrap"><input type="range" id="alert-level" min="0" max="100" value="70" step="1"><span class="slider-value" id="alert-level-value">70</span></div>
+        <div class="slider-wrap"><input type="range" id="alert-level" min="0" max="100" value="70" step="0.5"><span class="slider-value" id="alert-level-value">70</span></div>
       </div>
       <div class="form-group"><label class="form-label">Etiqueta (opcional)</label><input type="text" class="form-input" id="alert-label" placeholder="p.ej. Sobrecompra, short"></div>
       <div class="form-group"><label class="form-label">Aplica a</label><div style="font-size:12px; color:var(--text-muted); font-family:var(--font-mono);"><span id="alert-context">—</span></div></div>
@@ -913,7 +913,7 @@ function checkAlerts() {
 function showToast(a, rp) {
   const price = livePrice || candles[candles.length-1]?.close || 0;
   const dir = a.condition === 'cross_up' ? '↗' : '↘';
-  const title = `${dir} RSI ${a.condition === 'cross_up' ? 'cruzó AL ALZA' : 'cruzó A LA BAJA'} ${a.level}`;
+  const title = `${dir} RSI ${a.condition === 'cross_up' ? 'cruzó AL ALZA' : 'cruzó A LA BAJA'} ${parseFloat(a.level).toFixed(1)}`;
   const body = `${a.label || ''}${a.label?' · ':''}RSI ${rp.value.toFixed(1)} · ${currentAsset.display_name} ${(+price).toLocaleString('en-US',{minimumFractionDigits:2})}`;
   const c = document.getElementById('toast-container'), t = document.createElement('div');
   t.className = 'toast ' + (a.condition === 'cross_up' ? 'bull' : 'bear');
@@ -960,7 +960,7 @@ function renderLive(el) {
 function renderAlertList(my) {
   const c = document.getElementById('alert-list'); if (!c) return;
   if (my.length === 0) { c.innerHTML = '<div class="empty">Ninguna alerta activa.</div>'; return; }
-  c.innerHTML = my.map(a => `<div class="alert-item ${a.active?'':'inactive'}" data-id="${a.id}"><div class="alert-item-head"><span class="alert-level">${a.condition==='cross_up'?'↗':'↘'} ${(+a.level).toFixed(0)}</span><span class="alert-label">${a.label||(a.condition==='cross_up'?'Al alza':'A la baja')}</span><button class="alert-delete" data-del="${a.id}">×</button></div><div class="alert-meta"><span>RSI(${a.rsi_period})</span>${a.trigger_count?`<span>· ${a.trigger_count} disparos</span>`:''}</div></div>`).join('');
+  c.innerHTML = my.map(a => `<div class="alert-item ${a.active?'':'inactive'}" data-id="${a.id}"><div class="alert-item-head"><span class="alert-level">${a.condition==='cross_up'?'↗':'↘'} ${(+a.level).toFixed(1)}</span><span class="alert-label">${a.label||(a.condition==='cross_up'?'Al alza':'A la baja')}</span><button class="alert-delete" data-del="${a.id}">×</button></div><div class="alert-meta"><span>RSI(${a.rsi_period})</span>${a.trigger_count?`<span>· ${a.trigger_count} disparos</span>`:''}</div></div>`).join('');
   c.querySelectorAll('.alert-item').forEach(el => el.addEventListener('click', e => { if (!e.target.closest('.alert-delete')) openAlertModal(+el.dataset.id); }));
   c.querySelectorAll('.alert-delete').forEach(b => b.addEventListener('click', async e => { e.stopPropagation(); if (confirm('¿Eliminar alerta?')) { await deleteAlert(+b.dataset.del); renderSidebar(); renderRsiPriceLines(); } }));
 }
@@ -1024,7 +1024,7 @@ function openAlertModal(id) {
   document.getElementById('alert-title').textContent = ex ? 'Editar alerta' : 'Nueva alerta RSI';
   document.getElementById('alert-delete').style.display = ex ? 'inline-block' : 'none';
   const lvl = ex ? +ex.level : 70;
-  document.getElementById('alert-level').value = lvl; document.getElementById('alert-level-value').textContent = lvl;
+  document.getElementById('alert-level').value = lvl; document.getElementById('alert-level-value').textContent = parseFloat(lvl).toFixed(1);
   document.getElementById('alert-label').value = ex?.label || '';
   const cond = ex?.condition || 'cross_up';
   document.querySelectorAll('#modal-alert .condition-btn').forEach(b => b.classList.toggle('selected', b.dataset.value === cond));
@@ -1092,7 +1092,7 @@ function setupUI() {
     if (ok) { closeModal('modal-detail'); if (currentView === 'history') renderSidebar(); }
   });
 
-  document.getElementById('alert-level').addEventListener('input', e => document.getElementById('alert-level-value').textContent = e.target.value);
+  document.getElementById('alert-level').addEventListener('input', e => document.getElementById('alert-level-value').textContent = parseFloat(e.target.value).toFixed(1));
   document.querySelectorAll('#modal-alert .condition-btn').forEach(b => b.addEventListener('click', () => {
     document.querySelectorAll('#modal-alert .condition-btn').forEach(x => x.classList.remove('selected'));
     b.classList.add('selected');

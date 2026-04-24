@@ -32,6 +32,7 @@ YF_TF = {
     '15m': ('15m', '5d'),
     '1h':  ('60m', '60d'),
     '4h':  ('60m', '60d'),
+    '12h': ('60m', '180d'),   # se resamplea desde 1h
     '1d':  ('1d', '2y'),
     '1w':  ('1wk', '10y'),
 }
@@ -56,6 +57,11 @@ def fetch_candles(yf_symbol, timeframe):
         df.columns = df.columns.get_level_values(0)
     if timeframe == '4h':
         df = df.resample('4h').agg({
+            'Open': 'first', 'High': 'max', 'Low': 'min',
+            'Close': 'last', 'Volume': 'sum',
+        }).dropna()
+    elif timeframe == '12h':
+        df = df.resample('12h').agg({
             'Open': 'first', 'High': 'max', 'Low': 'min',
             'Close': 'last', 'Volume': 'sum',
         }).dropna()
@@ -101,6 +107,178 @@ def send_whatsapp(phone, apikey, message):
     except Exception as e:
         print(f'[WA error] {e}')
         return False
+
+
+
+
+# ============================================================
+# DETECCIÓN DE DIVERGENCIAS
+# ============================================================
+import numpy as np
+
+def find_pivots(df, rsi_series, left=3, right=3):
+    """Encuentra pivots altos y bajos tanto en precio como en RSI (combinados)."""
+    high_pivots, low_pivots = [], []
+    n = len(df)
+    rsi_aligned = rsi_series.reindex(df.index)
+    for i in range(left, n - right):
+        is_high, is_low = True, True
+        for j in range(i - left, i + right + 1):
+            if j == i:
+                continue
+            if df['High'].iloc[j] >= df['High'].iloc[i]:
+                is_high = False
+            if df['Low'].iloc[j] <= df['Low'].iloc[i]:
+                is_low = False
+        ts = int(df.index[i].timestamp())
+        if is_high and not np.isnan(rsi_aligned.iloc[i]):
+            high_pivots.append({
+                'idx': i, 'time': ts,
+                'price': float(df['High'].iloc[i]),
+                'rsi': float(rsi_aligned.iloc[i]),
+            })
+        if is_low and not np.isnan(rsi_aligned.iloc[i]):
+            low_pivots.append({
+                'idx': i, 'time': ts,
+                'price': float(df['Low'].iloc[i]),
+                'rsi': float(rsi_aligned.iloc[i]),
+            })
+    return high_pivots, low_pivots
+
+
+def detect_divergences(df, rsi_series):
+    """Detecta divergencias regulares alcistas/bajistas."""
+    high_pivots, low_pivots = find_pivots(df, rsi_series, 3, 3)
+    results = []
+    # Bajistas: precio HH + RSI LH
+    for i in range(1, len(high_pivots)):
+        for j in range(i):
+            p1, p2 = high_pivots[j], high_pivots[i]
+            if p2['idx'] - p1['idx'] < 5 or p2['idx'] - p1['idx'] > 50:
+                continue
+            if p2['price'] > p1['price'] * 1.001 and p2['rsi'] < p1['rsi'] - 1:
+                if p1['rsi'] > 50 or p2['rsi'] > 50:
+                    results.append({'type': 'bear', 'p1': p1, 'p2': p2})
+    # Alcistas: precio LL + RSI HL
+    for i in range(1, len(low_pivots)):
+        for j in range(i):
+            p1, p2 = low_pivots[j], low_pivots[i]
+            if p2['idx'] - p1['idx'] < 5 or p2['idx'] - p1['idx'] > 50:
+                continue
+            if p2['price'] < p1['price'] * 0.999 and p2['rsi'] > p1['rsi'] + 1:
+                if p1['rsi'] < 50 or p2['rsi'] < 50:
+                    results.append({'type': 'bull', 'p1': p1, 'p2': p2})
+    # Dedup por p2
+    by_p2 = {}
+    for d in results:
+        key = f"{d['type']}-{d['p2']['idx']}"
+        if key not in by_p2 or by_p2[key]['p1']['idx'] < d['p1']['idx']:
+            by_p2[key] = d
+    return list(by_p2.values())
+
+
+def process_divergence_alerts(assets_map):
+    """Escanea divergencia_alerts y envía WhatsApp para las divergencias nuevas."""
+    div_alerts = supabase.table('divergence_alerts').select('*').eq('active', True).execute().data or []
+    if not div_alerts:
+        return
+    print(f'\n{len(div_alerts)} alertas de divergencia activas')
+
+    # Agrupar por (symbol, tf, period)
+    groups = {}
+    for a in div_alerts:
+        key = (a['symbol'], a['timeframe'], a['rsi_period'])
+        groups.setdefault(key, []).append(a)
+
+    for (symbol, tf, period), group in groups.items():
+        asset = assets_map.get(symbol)
+        if not asset or not asset.get('yfinance_symbol'):
+            continue
+        yf_sym = asset['yfinance_symbol']
+        print(f'  [DIV] {symbol} ({yf_sym}) · {tf} · RSI({period})')
+        df = fetch_candles(yf_sym, tf)
+        if df is None or len(df) < period + 10:
+            print('    [SKIP] datos insuficientes')
+            continue
+        rsi = compute_rsi(df['Close'], period)
+        divs = detect_divergences(df, rsi)
+        if not divs:
+            continue
+        # Tomar solo las divergencias más recientes (p2 entre las últimas 3 velas)
+        last_time = int(df.index[-1].timestamp())
+        recent_cutoff_idx = len(df) - 3
+        fresh_divs = [d for d in divs if d['p2']['idx'] >= recent_cutoff_idx]
+        if not fresh_divs:
+            continue
+        print(f'    Divergencias frescas: {len(fresh_divs)}')
+
+        for alert in group:
+            user_id = alert['user_id']
+            # Verificar que no se haya ya notificado
+            for d in fresh_divs:
+                # Dedup contra tabla detected_divergences
+                existing = supabase.table('detected_divergences').select('id,notified').eq(
+                    'user_id', user_id
+                ).eq('symbol', symbol).eq('timeframe', tf).eq(
+                    'rsi_period', period
+                ).eq('divergence_type', d['type']).eq(
+                    'pivot2_time', d['p2']['time']
+                ).execute().data
+                if existing and existing[0].get('notified'):
+                    continue  # ya notificada
+
+                # Perfil
+                prof_resp = supabase.table('profiles').select(
+                    'wa_phone, wa_apikey'
+                ).eq('user_id', user_id).maybe_single().execute()
+                profile = prof_resp.data if prof_resp else None
+                if not profile or not profile.get('wa_phone'):
+                    continue
+                phone = profile['wa_phone']
+                apikey = profile.get('wa_apikey') or WA_APIKEY_DEFAULT
+                if not apikey:
+                    continue
+
+                # Precio actual
+                price_now = get_current_price(asset, d['p2']['price'])
+                decimals = asset.get('decimals') or 2
+                display = asset.get('display_name') or symbol
+                icon = '📈' if d['type'] == 'bull' else '📉'
+                type_word = 'ALCISTA' if d['type'] == 'bull' else 'BAJISTA'
+
+                msg = (
+                    f"{icon} *Divergencia {type_word}*\n\n"
+                    f"*{display}* · {tf} · RSI({period})\n\n"
+                    f"Precio: {d['p1']['price']:,.{decimals}f} → {d['p2']['price']:,.{decimals}f}\n"
+                    f"RSI: {d['p1']['rsi']:.1f} → {d['p2']['rsi']:.1f}\n\n"
+                    f"Precio ahora: *{price_now:,.{decimals}f}*\n\n"
+                    f"{datetime.now().strftime('%H:%M · %d %b')}"
+                )
+
+                if send_whatsapp(phone, apikey, msg):
+                    print(f'    [OK] Div {d["type"]} -> {phone}')
+                    try:
+                        supabase.table('detected_divergences').upsert({
+                            'user_id': user_id,
+                            'symbol': symbol,
+                            'timeframe': tf,
+                            'rsi_period': period,
+                            'divergence_type': d['type'],
+                            'pivot1_time': d['p1']['time'],
+                            'pivot1_price': d['p1']['price'],
+                            'pivot1_rsi': d['p1']['rsi'],
+                            'pivot2_time': d['p2']['time'],
+                            'pivot2_price': d['p2']['price'],
+                            'pivot2_rsi': d['p2']['rsi'],
+                            'notified': True,
+                        }, on_conflict='user_id,symbol,timeframe,rsi_period,divergence_type,pivot2_time').execute()
+                        supabase.table('divergence_alerts').update({
+                            'last_triggered_at': datetime.now(timezone.utc).isoformat(),
+                            'trigger_count': (alert.get('trigger_count') or 0) + 1,
+                        }).eq('id', alert['id']).execute()
+                    except Exception as e:
+                        print(f'    [WARN] {e}')
+                    time.sleep(7)
 
 
 def run():
@@ -185,7 +363,7 @@ def run():
             msg = (
                 f'{icon} *Alerta RSI*\n\n'
                 f'*{display}* · {tf} · RSI({period})\n'
-                f'RSI {dir_word} {int(level)}\n'
+                f'RSI {dir_word} {level:.1f}\n'
                 f'RSI actual: *{last_rsi:.1f}*\n'
                 f'Precio ahora: *{pretty_price}*\n'
                 f'Cierre vela: {pretty_close}'
@@ -212,6 +390,12 @@ def run():
                 print(f'    [FAIL] #{alert["id"]}')
 
             time.sleep(7)
+
+    # Procesar alertas de divergencias
+    try:
+        process_divergence_alerts(assets_map)
+    except Exception as e:
+        print(f'[ERROR divergencias] {e}')
 
     print('--- Fin ---')
 
