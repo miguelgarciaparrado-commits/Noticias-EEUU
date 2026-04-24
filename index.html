@@ -71,6 +71,7 @@
 
   .icon-btn { background: var(--surface-2); border: 1px solid var(--border); color: var(--text-muted); width: 32px; height: 32px; border-radius: 5px; cursor: pointer; font-size: 16px; display: grid; place-items: center; }
   .icon-btn:hover { color: var(--text); border-color: var(--border-strong); }
+  .icon-btn.active { background: var(--accent); color: #000; border-color: var(--accent); }
 
   .main { display: grid; grid-template-columns: 1fr 340px; overflow: hidden; }
   @media (max-width: 900px) { .main { grid-template-columns: 1fr; grid-template-rows: 1fr auto; } .sidebar { max-height: 45vh; } }
@@ -267,9 +268,13 @@
         <button class="tf-btn" data-tf="15m">15m</button>
         <button class="tf-btn" data-tf="1h">1H</button>
         <button class="tf-btn" data-tf="4h">4H</button>
+        <button class="tf-btn" data-tf="12h">12H</button>
         <button class="tf-btn active" data-tf="1d">1D</button>
         <button class="tf-btn" data-tf="1w">1W</button>
       </div>
+      <button class="icon-btn" id="btn-channels" title="Detectar canales automáticamente">📐</button>
+      <button class="icon-btn" id="btn-draw" title="Dibujar línea (click + click)">✏️</button>
+      <button class="icon-btn" id="btn-clear-lines" title="Borrar todas las líneas/canales">🗑️</button>
       <button class="icon-btn" id="btn-profile" title="Perfil">👤</button>
 
     </div>
@@ -376,28 +381,52 @@ let currentTF = '1d';
 let currentView = 'live';
 let candles = [];
 let patterns = [], historyPatterns = [], fvgs = [];
-let chart, candleSeries, rsiSeries;
+let chart, candleSeries, rsiSeries, volumeSeries;
 let updateTimer = null;
+let priceWS = null;           // WebSocket Binance para precio live
+let drawMode = false;         // modo dibujo ON/OFF
+let drawnLines = [];          // { id, price1, time1, price2, time2, series }
+let drawingTemp = null;       // línea en proceso de dibujo
+let selectedLineId = null;
+let channelSeries = [];       // series de líneas de los canales dibujados
+let livePrice = null;         // último precio tick-by-tick
 let sb = null;
 let currentUser = null;
 let profile = {};
 let rsiPeriod = 14, rsiValues = [], rsiPriceLines = [];
 let alerts = [], lastFiredTimes = {}, isFirstScan = true;
+let previousOpenFVGs = new Set();  // para detectar FVGs que se acaban de llenar
 let detailingPatternId = null, editingAlertId = null;
 
 const PATTERN_CONFIG = {
+  // 2 velas
   bullEngulfing: { name: 'Envolvente alcista', bias: 'bull', on: true },
   bearEngulfing: { name: 'Envolvente bajista', bias: 'bear', on: true },
+  piercingLine:  { name: 'Línea penetrante', bias: 'bull', on: true },
+  darkCloud:     { name: 'Nube oscura', bias: 'bear', on: true },
+  bullHarami:    { name: 'Harami alcista', bias: 'bull', on: true },
+  bearHarami:    { name: 'Harami bajista', bias: 'bear', on: true },
+  tweezerBottom: { name: 'Pinzas inferiores', bias: 'bull', on: false },
+  tweezerTop:    { name: 'Pinzas superiores', bias: 'bear', on: false },
+  bullKicker:    { name: 'Patada alcista', bias: 'bull', on: true },
+  bearKicker:    { name: 'Patada bajista', bias: 'bear', on: true },
+  // 1 vela (útiles)
+  hammer:        { name: 'Martillo', bias: 'bull', on: true },
+  shootingStar:  { name: 'Estrella fugaz', bias: 'bear', on: true },
+  // 3 velas
   morningStar:   { name: 'Estrella de la mañana', bias: 'bull', on: true },
   eveningStar:   { name: 'Estrella de la tarde', bias: 'bear', on: true },
   threeWhite:    { name: 'Tres soldados blancos', bias: 'bull', on: true },
   threeBlack:    { name: 'Tres cuervos negros', bias: 'bear', on: true },
-  bullHarami:    { name: 'Harami alcista', bias: 'bull', on: true },
-  bearHarami:    { name: 'Harami bajista', bias: 'bear', on: true },
-  hammer:        { name: 'Martillo', bias: 'bull', on: true },
-  shootingStar:  { name: 'Estrella fugaz', bias: 'bear', on: true },
-  tweezerBottom: { name: 'Pinzas inferiores', bias: 'bull', on: false },
-  tweezerTop:    { name: 'Pinzas superiores', bias: 'bear', on: false },
+  threeInsideUp:    { name: 'Tres adentro arriba', bias: 'bull', on: true },
+  threeInsideDown:  { name: 'Tres adentro abajo', bias: 'bear', on: true },
+  threeOutsideUp:   { name: 'Tres afuera arriba', bias: 'bull', on: true },
+  threeOutsideDown: { name: 'Tres afuera abajo', bias: 'bear', on: true },
+  abandonedBullBaby: { name: 'Bebé abandonado alcista', bias: 'bull', on: false },
+  abandonedBearBaby: { name: 'Bebé abandonado bajista', bias: 'bear', on: false },
+  // 5 velas (continuación)
+  risingThree:   { name: 'Tres métodos alcistas', bias: 'bull', on: false },
+  fallingThree:  { name: 'Tres métodos bajistas', bias: 'bear', on: false },
 };
 let showFVG = true;
 
@@ -459,6 +488,7 @@ async function startAppNoAuth() {
   setupUI();
   await loadAlerts();
   await loadData();
+  loadLinesFromStorage();
   updateTimer = setInterval(loadData, 30000);
 }
 function showAuthScreen() { document.getElementById('auth-screen').style.display = 'grid'; document.getElementById('app-shell').style.display = 'none'; }
@@ -503,13 +533,23 @@ function initChart() {
     layout: { background: { color: '#0a0a0b' }, textColor: '#8a8a94', fontFamily: 'IBM Plex Mono, monospace', fontSize: 11 },
     grid: { vertLines: { color: '#17171c' }, horzLines: { color: '#17171c' } },
     crosshair: { mode: LightweightCharts.CrosshairMode.Normal, vertLine: { color: '#33333c', width: 1, style: 2 }, horzLine: { color: '#33333c', width: 1, style: 2 } },
-    rightPriceScale: { borderColor: '#24242b', scaleMargins: { top: 0.05, bottom: 0.28 } },
+    rightPriceScale: { borderColor: '#24242b', scaleMargins: { top: 0.05, bottom: 0.42 } },
     timeScale: { borderColor: '#24242b', timeVisible: true, secondsVisible: false },
     width: c.clientWidth, height: c.clientHeight,
   });
+  // Serie de velas (precio): ocupa ~58% superior
   candleSeries = chart.addCandlestickSeries({ upColor: '#10b981', downColor: '#ef4444', borderUpColor: '#10b981', borderDownColor: '#ef4444', wickUpColor: '#10b981', wickDownColor: '#ef4444' });
+  // Serie de volumen: panel propio, 60-75% del chart
+  volumeSeries = chart.addHistogramSeries({
+    priceScaleId: 'volume',
+    priceFormat: { type: 'volume' },
+    color: 'rgba(100,116,139,0.5)',
+  });
+  chart.priceScale('volume').applyOptions({ scaleMargins: { top: 0.62, bottom: 0.26 }, borderColor: '#24242b' });
+  // Serie de RSI: abajo, 76-100%
   rsiSeries = chart.addLineSeries({ priceScaleId: 'rsi', color: '#a855f7', lineWidth: 2, priceLineVisible: false, lastValueVisible: true, priceFormat: { type: 'custom', formatter: v => v.toFixed(1) } });
-  chart.priceScale('rsi').applyOptions({ scaleMargins: { top: 0.78, bottom: 0.02 }, borderColor: '#24242b' });
+  chart.priceScale('rsi').applyOptions({ scaleMargins: { top: 0.80, bottom: 0.02 }, borderColor: '#24242b' });
+
   new ResizeObserver(() => { chart.applyOptions({ width: c.clientWidth, height: c.clientHeight }); resizeFVGCanvas(); }).observe(c);
   chart.timeScale().subscribeVisibleTimeRangeChange(drawFVGs);
 }
@@ -537,16 +577,74 @@ async function fetchBinance() {
 async function fetchTwelveData() {
   document.getElementById('data-source-status').textContent = 'TwelveData · 30s';
   if (!profile.td_api_key) throw new Error('Configura TwelveData API key en tu perfil 👤');
-  const TF_MAP = { '15m': '15min', '1h': '1h', '4h': '4h', '1d': '1day', '1w': '1week' };
+  const TF_MAP = { '15m': '15min', '1h': '1h', '4h': '4h', '12h': '4h', '1d': '1day', '1w': '1week' };
   const interval = TF_MAP[currentTF] || '1day';
   const sym = currentAsset.twelvedata_symbol || currentAsset.symbol;
-  const url = `https://api.twelvedata.com/time_series?symbol=${sym}&interval=${interval}&outputsize=${LIMIT}&apikey=${profile.td_api_key}`;
+  // Si es 12h, pedimos más datos de 4h porque vamos a agrupar de 3 en 3
+  const outputSize = currentTF === '12h' ? LIMIT * 3 : LIMIT;
+  const url = `https://api.twelvedata.com/time_series?symbol=${sym}&interval=${interval}&outputsize=${outputSize}&apikey=${profile.td_api_key}`;
   const r = await fetch(url);
   if (!r.ok) throw new Error('TwelveData ' + r.status);
   const j = await r.json();
   if (j.status === 'error') throw new Error(j.message || 'TwelveData error');
   if (!j.values) throw new Error('Sin datos de TwelveData');
-  return j.values.map(v => ({ time: Math.floor(new Date(v.datetime + 'Z').getTime()/1000), open: +v.open, high: +v.high, low: +v.low, close: +v.close, volume: +(v.volume||0) })).reverse();
+  let arr = j.values.map(v => ({ time: Math.floor(new Date(v.datetime + 'Z').getTime()/1000), open: +v.open, high: +v.high, low: +v.low, close: +v.close, volume: +(v.volume||0) })).reverse();
+  // Resample 4h -> 12h si aplica
+  if (currentTF === '12h') {
+    const out = [];
+    for (let i = 0; i < arr.length; i += 3) {
+      const slice = arr.slice(i, i+3);
+      if (slice.length === 0) break;
+      out.push({
+        time: slice[0].time,
+        open: slice[0].open,
+        high: Math.max(...slice.map(s => s.high)),
+        low: Math.min(...slice.map(s => s.low)),
+        close: slice[slice.length-1].close,
+        volume: slice.reduce((s,c) => s + c.volume, 0),
+      });
+    }
+    arr = out;
+  }
+  return arr;
+}
+
+
+// ============================================================
+// PRECIO EN DIRECTO (WebSocket Binance para crypto)
+// ============================================================
+function closePriceWS() {
+  if (priceWS) { try { priceWS.close(); } catch {} priceWS = null; }
+}
+function openPriceWS() {
+  closePriceWS();
+  if (!currentAsset || currentAsset.data_source !== 'binance') return;
+  const sym = (currentAsset.binance_symbol || currentAsset.symbol).toLowerCase();
+  try {
+    priceWS = new WebSocket(`wss://stream.binance.com:9443/ws/${sym}@ticker`);
+    priceWS.onmessage = (ev) => {
+      try {
+        const d = JSON.parse(ev.data);
+        livePrice = +d.c;  // close price (último precio)
+        const pct24 = +d.P; // cambio 24h en %
+        // Actualizar ticker directamente
+        if (!candles.length || !currentAsset) return;
+        const decimals = currentAsset.decimals ?? 2;
+        const priceEl = document.getElementById('price');
+        const prefix = (currentAsset.asset_type === 'crypto' || currentAsset.asset_type === 'stock') ? '$' : '';
+        priceEl.textContent = prefix + livePrice.toLocaleString('en-US', { minimumFractionDigits: decimals, maximumFractionDigits: decimals });
+        // color según cambio 24h
+        priceEl.className = 'ticker-price ' + (pct24 >= 0 ? 'up' : 'down');
+        // actualizar change
+        const changeAbs = (livePrice * pct24 / 100);
+        const s = pct24 >= 0 ? '+' : '';
+        const changeEl = document.getElementById('change');
+        changeEl.textContent = `${s}${changeAbs.toFixed(decimals)} (${s}${pct24.toFixed(2)}%)`;
+        changeEl.className = 'ticker-change ' + (pct24 >= 0 ? 'up' : 'down');
+      } catch {}
+    };
+    priceWS.onerror = () => { console.warn('WS error'); };
+  } catch (e) { console.warn('WS no disponible:', e); }
 }
 
 async function loadData() {
@@ -554,6 +652,15 @@ async function loadData() {
   try {
     candles = await fetchCandles();
     candleSeries.setData(candles);
+    // Volumen: colorear según vela alcista/bajista
+    volumeSeries.setData(candles.map(c => ({
+      time: c.time,
+      value: c.volume,
+      color: c.close >= c.open ? 'rgba(16,185,129,0.4)' : 'rgba(239,68,68,0.4)',
+    })));
+    // Autoescala al cambiar de activo/TF (solo en primer scan para no molestar al usuario si hizo zoom)
+    if (isFirstScan) chart.timeScale().fitContent();
+    openPriceWS();
     computeAndRenderRSI();
     runAnalysis();
     checkAlerts();
@@ -643,6 +750,40 @@ function detectPatterns() {
     if (PATTERN_CONFIG.eveningStar.on && tr==='up' && iB(c0) && bd(c0)>avg*0.7 && bd(c1)<bd(c0)*0.4 && iS(c2) && bd(c2)>avg*0.6 && c2.close<mb(c0)) r.push({time:c2.time, type:'eveningStar', ...PATTERN_CONFIG.eveningStar});
     if (PATTERN_CONFIG.threeWhite.on && tr!=='up' && iB(c0) && iB(c1) && iB(c2) && bd(c0)>avg*0.5 && bd(c1)>avg*0.5 && bd(c2)>avg*0.5 && c1.open>c0.open && c1.open<c0.close && c2.open>c1.open && c2.open<c1.close && c1.close>c0.close && c2.close>c1.close && uw(c1)<bd(c1)*0.3 && uw(c2)<bd(c2)*0.3) r.push({time:c2.time, type:'threeWhite', ...PATTERN_CONFIG.threeWhite});
     if (PATTERN_CONFIG.threeBlack.on && tr!=='down' && iS(c0) && iS(c1) && iS(c2) && bd(c0)>avg*0.5 && bd(c1)>avg*0.5 && bd(c2)>avg*0.5 && c1.open<c0.open && c1.open>c0.close && c2.open<c1.open && c2.open>c1.close && c1.close<c0.close && c2.close<c1.close && lw(c1)<bd(c1)*0.3 && lw(c2)<bd(c2)*0.3) r.push({time:c2.time, type:'threeBlack', ...PATTERN_CONFIG.threeBlack});
+
+    // Línea penetrante (2 velas alcista)
+    if (PATTERN_CONFIG.piercingLine.on && tr==='down' && iS(c1) && iB(c2) && bd(c1)>avg*0.6 && c2.open<c1.low && c2.close>mb(c1) && c2.close<c1.open) r.push({time:c2.time, type:'piercingLine', ...PATTERN_CONFIG.piercingLine});
+    // Nube oscura (2 velas bajista)
+    if (PATTERN_CONFIG.darkCloud.on && tr==='up' && iB(c1) && iS(c2) && bd(c1)>avg*0.6 && c2.open>c1.high && c2.close<mb(c1) && c2.close>c1.open) r.push({time:c2.time, type:'darkCloud', ...PATTERN_CONFIG.darkCloud});
+
+    // Patada alcista: bajista + alcista con gap al alza (open > close anterior)
+    if (PATTERN_CONFIG.bullKicker.on && iS(c1) && iB(c2) && c2.open > c1.open && bd(c1)>avg*0.4 && bd(c2)>avg*0.4) r.push({time:c2.time, type:'bullKicker', ...PATTERN_CONFIG.bullKicker});
+    // Patada bajista: alcista + bajista con gap a la baja
+    if (PATTERN_CONFIG.bearKicker.on && iB(c1) && iS(c2) && c2.open < c1.open && bd(c1)>avg*0.4 && bd(c2)>avg*0.4) r.push({time:c2.time, type:'bearKicker', ...PATTERN_CONFIG.bearKicker});
+
+    // Tres adentro arriba: Harami alcista + vela alcista de confirmación
+    if (PATTERN_CONFIG.threeInsideUp.on && tr==='down' && iS(c0) && iB(c1) && iB(c2) && bd(c0)>avg*0.7 && c1.open>c0.close && c1.close<c0.open && bd(c1)<bd(c0)*0.6 && c2.close>c1.close) r.push({time:c2.time, type:'threeInsideUp', ...PATTERN_CONFIG.threeInsideUp});
+    // Tres adentro abajo
+    if (PATTERN_CONFIG.threeInsideDown.on && tr==='up' && iB(c0) && iS(c1) && iS(c2) && bd(c0)>avg*0.7 && c1.open<c0.close && c1.close>c0.open && bd(c1)<bd(c0)*0.6 && c2.close<c1.close) r.push({time:c2.time, type:'threeInsideDown', ...PATTERN_CONFIG.threeInsideDown});
+
+    // Tres afuera arriba: Envolvente alcista + vela alcista de confirmación
+    if (PATTERN_CONFIG.threeOutsideUp.on && tr==='down' && iS(c0) && iB(c1) && iB(c2) && c1.open<c0.close && c1.close>c0.open && c2.close>c1.close) r.push({time:c2.time, type:'threeOutsideUp', ...PATTERN_CONFIG.threeOutsideUp});
+    // Tres afuera abajo
+    if (PATTERN_CONFIG.threeOutsideDown.on && tr==='up' && iB(c0) && iS(c1) && iS(c2) && c1.open>c0.close && c1.close<c0.open && c2.close<c1.close) r.push({time:c2.time, type:'threeOutsideDown', ...PATTERN_CONFIG.threeOutsideDown});
+
+    // Bebé abandonado alcista: vela bajista + doji con gap + alcista con gap
+    if (PATTERN_CONFIG.abandonedBullBaby.on && tr==='down' && iS(c0) && bd(c0)>avg*0.6 && bd(c1)<avg*0.15 && iB(c2) && bd(c2)>avg*0.5 && c1.high<c0.low && c1.low>c2.open*0.99 && c2.open>c1.high) r.push({time:c2.time, type:'abandonedBullBaby', ...PATTERN_CONFIG.abandonedBullBaby});
+    // Bebé abandonado bajista
+    if (PATTERN_CONFIG.abandonedBearBaby.on && tr==='up' && iB(c0) && bd(c0)>avg*0.6 && bd(c1)<avg*0.15 && iS(c2) && bd(c2)>avg*0.5 && c1.low>c0.high && c1.high<c2.open*1.01 && c2.open<c1.low) r.push({time:c2.time, type:'abandonedBearBaby', ...PATTERN_CONFIG.abandonedBearBaby});
+
+    // Tres métodos alcistas/bajistas (5 velas) - requieren i >= 4
+    if (i >= 4) {
+      const cm4=candles[i-4], cm3=candles[i-3];
+      // Rising Three: vela alcista grande + 3 bajistas pequeñas dentro + alcista grande que supera la primera
+      if (PATTERN_CONFIG.risingThree.on && iB(cm4) && bd(cm4)>avg*0.8 && iS(c0) && iS(c1) && bd(c0)<bd(cm4)*0.6 && bd(c1)<bd(cm4)*0.6 && c0.high<cm4.high && c1.high<cm4.high && iB(c2) && bd(c2)>avg*0.7 && c2.close>cm4.close) r.push({time:c2.time, type:'risingThree', ...PATTERN_CONFIG.risingThree});
+      // Falling Three
+      if (PATTERN_CONFIG.fallingThree.on && iS(cm4) && bd(cm4)>avg*0.8 && iB(c0) && iB(c1) && bd(c0)<bd(cm4)*0.6 && bd(c1)<bd(cm4)*0.6 && c0.low>cm4.low && c1.low>cm4.low && iS(c2) && bd(c2)>avg*0.7 && c2.close<cm4.close) r.push({time:c2.time, type:'fallingThree', ...PATTERN_CONFIG.fallingThree});
+    }
   }
   return r;
 }
@@ -691,7 +832,33 @@ function drawFVGs() {
     ctx.strokeRect(x1, yT, x2-x1, yB-yT); ctx.setLineDash([]);
   });
 }
-function runAnalysis() { patterns = detectPatterns(); fvgs = detectFVGs(); drawMarkers(); drawFVGs(); renderSidebar(); }
+function runAnalysis() {
+  patterns = detectPatterns();
+  const previousFvgs = fvgs;
+  fvgs = detectFVGs();
+  // Detectar FVG recién llenados: los que estaban abiertos en el anterior análisis y ahora están cerrados
+  if (!isFirstScan && previousFvgs.length > 0) {
+    const newlyFilled = [];
+    fvgs.forEach(f => {
+      const prev = previousFvgs.find(p => p.startTime === f.startTime && p.type === f.type);
+      if (prev && !prev.fillTime && f.fillTime) {
+        newlyFilled.push(f);
+      }
+    });
+    newlyFilled.forEach(f => showFVGFilledToast(f));
+  }
+  drawMarkers(); drawFVGs(); renderSidebar();
+}
+
+function showFVGFilledToast(fvg) {
+  const c = document.getElementById('toast-container'), t = document.createElement('div');
+  t.className = 'toast ' + (fvg.type === 'bull' ? 'bull' : 'bear');
+  const middle = ((fvg.top + fvg.bottom) / 2).toFixed(currentAsset?.decimals ?? 2);
+  t.innerHTML = `<div class="toast-title"><span>FVG ${fvg.type === 'bull' ? 'alcista' : 'bajista'} rellenado</span><button class="toast-close">×</button></div><div class="toast-body">${currentAsset?.display_name || ''} · ${currentTF}<br>Zona: ~${middle}<br><em style="color:var(--text-dim);">Posible zona de reacción</em></div>`;
+  c.appendChild(t);
+  t.querySelector('.toast-close').onclick = () => { t.classList.add('fading'); setTimeout(()=>t.remove(),300); };
+  setTimeout(()=>{ t.classList.add('fading'); setTimeout(()=>t.remove(),300); }, 10000);
+}
 
 // ============================================================
 // SYNC
@@ -739,7 +906,7 @@ function checkAlerts() {
   });
 }
 function showToast(a, rp) {
-  const price = candles[candles.length-1]?.close || 0;
+  const price = livePrice || candles[candles.length-1]?.close || 0;
   const dir = a.condition === 'cross_up' ? '↗' : '↘';
   const title = `${dir} RSI ${a.condition === 'cross_up' ? 'cruzó AL ALZA' : 'cruzó A LA BAJA'} ${a.level}`;
   const body = `${a.label || ''}${a.label?' · ':''}RSI ${rp.value.toFixed(1)} · ${currentAsset.display_name} ${(+price).toLocaleString('en-US',{minimumFractionDigits:2})}`;
@@ -868,12 +1035,19 @@ function setupUI() {
   document.getElementById('asset-select').addEventListener('change', e => {
     currentAsset = assetsCatalog.find(a => a.symbol === e.target.value);
     isFirstScan = true; saveUIState();
-    loadData().then(() => { renderRsiPriceLines(); if (currentView === 'history') renderSidebar(); });
+    // limpiar líneas del activo anterior del chart
+    drawnLines.forEach(l => { try { chart.removeSeries(l.series); } catch {} });
+    drawnLines = [];
+    clearChannels();
+    loadData().then(() => { renderRsiPriceLines(); loadLinesFromStorage(); if (currentView === 'history') renderSidebar(); });
   });
   document.querySelectorAll('.tf-btn').forEach(b => b.addEventListener('click', () => {
     document.querySelectorAll('.tf-btn').forEach(x => x.classList.remove('active')); b.classList.add('active');
     currentTF = b.dataset.tf; isFirstScan = true; saveUIState();
-    loadData().then(() => { renderRsiPriceLines(); if (currentView === 'history') renderSidebar(); });
+    drawnLines.forEach(l => { try { chart.removeSeries(l.series); } catch {} });
+    drawnLines = [];
+    clearChannels();
+    loadData().then(() => { renderRsiPriceLines(); loadLinesFromStorage(); if (currentView === 'history') renderSidebar(); });
   }));
   document.querySelectorAll('.view-btn').forEach(b => b.addEventListener('click', () => {
     document.querySelectorAll('.view-btn').forEach(x => x.classList.remove('active')); b.classList.add('active');
@@ -921,6 +1095,17 @@ function setupUI() {
   document.getElementById('alert-delete').addEventListener('click', async () => {
     if (editingAlertId && confirm('¿Eliminar?')) { await deleteAlert(editingAlertId); closeModal('modal-alert'); renderSidebar(); renderRsiPriceLines(); }
   });
+
+  // Botones de dibujo y canales
+  document.getElementById('btn-draw').addEventListener('click', toggleDrawMode);
+  document.getElementById('btn-channels').addEventListener('click', drawChannels);
+  document.getElementById('btn-clear-lines').addEventListener('click', () => {
+    clearAllLines();
+    clearChannels();
+  });
+
+  // Click en chart para dibujar
+  chart.subscribeClick(handleChartClick);
 }
 
 function restoreUIState() {
@@ -994,6 +1179,226 @@ function setupAuthScreen() {
 }
 
 // ============================================================
+
+
+// ============================================================
+// CANALES AUTOMÁTICOS (alcistas / bajistas)
+// ============================================================
+
+// Detectar swings (pivot points) de tamaño n
+function findPivots(arr, left = 3, right = 3) {
+  const highs = [], lows = [];
+  for (let i = left; i < arr.length - right; i++) {
+    const c = arr[i];
+    let isHigh = true, isLow = true;
+    for (let j = i - left; j <= i + right; j++) {
+      if (j === i) continue;
+      if (arr[j].high >= c.high) isHigh = false;
+      if (arr[j].low <= c.low) isLow = false;
+    }
+    if (isHigh) highs.push({ idx: i, time: c.time, price: c.high });
+    if (isLow) lows.push({ idx: i, time: c.time, price: c.low });
+  }
+  return { highs, lows };
+}
+
+// Regresión lineal simple sobre [{x, y}]
+function linearRegression(points) {
+  const n = points.length;
+  if (n < 2) return null;
+  let sumX = 0, sumY = 0, sumXY = 0, sumX2 = 0;
+  for (const p of points) {
+    sumX += p.x; sumY += p.y; sumXY += p.x * p.y; sumX2 += p.x * p.x;
+  }
+  const slope = (n * sumXY - sumX * sumY) / (n * sumX2 - sumX * sumX);
+  const intercept = (sumY - slope * sumX) / n;
+  // R²
+  const meanY = sumY / n;
+  let ssRes = 0, ssTot = 0;
+  for (const p of points) {
+    const pred = slope * p.x + intercept;
+    ssRes += (p.y - pred) ** 2;
+    ssTot += (p.y - meanY) ** 2;
+  }
+  const r2 = ssTot === 0 ? 0 : 1 - ssRes / ssTot;
+  return { slope, intercept, r2 };
+}
+
+function detectChannels() {
+  // Mirar las últimas ~80 velas (buen compromiso entre local y significativo)
+  const lookback = Math.min(80, candles.length);
+  const slice = candles.slice(-lookback);
+  const offset = candles.length - lookback;
+  const { highs, lows } = findPivots(slice, 3, 3);
+  if (highs.length < 3 || lows.length < 3) return [];
+
+  // Convertimos idx relativo al slice a idx absoluto en candles
+  const pointsLow = lows.map(p => ({ x: p.idx + offset, y: p.price, time: p.time }));
+  const pointsHigh = highs.map(p => ({ x: p.idx + offset, y: p.price, time: p.time }));
+
+  // Tomamos los últimos 3-4 pivotes que toquen la línea (para que sea reciente)
+  const recentLows = pointsLow.slice(-Math.min(4, pointsLow.length));
+  const recentHighs = pointsHigh.slice(-Math.min(4, pointsHigh.length));
+
+  const regLow = linearRegression(recentLows);
+  const regHigh = linearRegression(recentHighs);
+  if (!regLow || !regHigh) return [];
+
+  // Determinar tipo de canal por pendientes promedio
+  const avgSlope = (regLow.slope + regHigh.slope) / 2;
+  const slopeDiff = Math.abs(regLow.slope - regHigh.slope);
+  const avgRange = (candles[candles.length-1].close - candles[0].close) / candles.length;
+  
+  // Las pendientes deben ser similares (paralelas, tolerancia proporcional)
+  const parallelOk = slopeDiff < Math.abs(avgSlope) * 2 + Math.abs(avgRange) * 0.5;
+  // R² mínimo para considerar la regresión válida
+  const minR2 = 0.3;
+
+  const channels = [];
+  
+  if (regLow.r2 > minR2 && regHigh.r2 > minR2 && parallelOk) {
+    // Tipo: alcista si ambas pendientes > 0, bajista si < 0, lateral si ~0
+    let type = 'lateral';
+    if (avgSlope > 0.0001 * candles[0].close) type = 'up';
+    else if (avgSlope < -0.0001 * candles[0].close) type = 'down';
+    
+    const firstX = recentLows[0].x;
+    const lastX = candles.length - 1;
+    const firstTime = candles[firstX].time;
+    const lastTime = candles[lastX].time;
+    
+    channels.push({
+      type,
+      supportLine: {
+        time1: firstTime,
+        price1: regLow.slope * firstX + regLow.intercept,
+        time2: lastTime,
+        price2: regLow.slope * lastX + regLow.intercept,
+      },
+      resistanceLine: {
+        time1: firstTime,
+        price1: regHigh.slope * firstX + regHigh.intercept,
+        time2: lastTime,
+        price2: regHigh.slope * lastX + regHigh.intercept,
+      },
+      r2Low: regLow.r2,
+      r2High: regHigh.r2,
+    });
+  }
+  return channels;
+}
+
+function drawChannels() {
+  clearChannels();
+  const channels = detectChannels();
+  if (channels.length === 0) {
+    alert('No se ha podido detectar un canal claro en las últimas 80 velas.\n\nEsto puede ser normal si el precio está en estructura lateral ruidosa o muy volátil. Prueba cambiando de timeframe.');
+    return;
+  }
+  channels.forEach(ch => {
+    const color = ch.type === 'up' ? '#10b981' : ch.type === 'down' ? '#ef4444' : '#64748b';
+    // Línea soporte
+    const s1 = chart.addLineSeries({ color, lineWidth: 2, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false, lineStyle: 0 });
+    s1.setData([
+      { time: ch.supportLine.time1, value: ch.supportLine.price1 },
+      { time: ch.supportLine.time2, value: ch.supportLine.price2 },
+    ]);
+    channelSeries.push(s1);
+    // Línea resistencia
+    const s2 = chart.addLineSeries({ color, lineWidth: 2, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false, lineStyle: 0 });
+    s2.setData([
+      { time: ch.resistanceLine.time1, value: ch.resistanceLine.price1 },
+      { time: ch.resistanceLine.time2, value: ch.resistanceLine.price2 },
+    ]);
+    channelSeries.push(s2);
+  });
+  const typeLabel = channels[0].type === 'up' ? 'ALCISTA' : channels[0].type === 'down' ? 'BAJISTA' : 'LATERAL';
+  console.log(`Canal ${typeLabel} detectado · R²: soporte=${channels[0].r2Low.toFixed(2)}, resistencia=${channels[0].r2High.toFixed(2)}`);
+}
+
+function clearChannels() {
+  channelSeries.forEach(s => { try { chart.removeSeries(s); } catch {} });
+  channelSeries = [];
+}
+
+// ============================================================
+// LÍNEAS DIBUJABLES SOBRE EL CHART
+// ============================================================
+function toggleDrawMode() {
+  drawMode = !drawMode;
+  document.getElementById('btn-draw').classList.toggle('active', drawMode);
+  const chartEl = document.getElementById('chart');
+  chartEl.style.cursor = drawMode ? 'crosshair' : 'default';
+  if (!drawMode) drawingTemp = null;
+}
+
+function clearAllLines() {
+  if (drawnLines.length === 0) return;
+  if (!confirm('¿Borrar todas las líneas dibujadas?')) return;
+  drawnLines.forEach(l => { try { chart.removeSeries(l.series); } catch {} });
+  drawnLines = [];
+  saveLinesToStorage();
+}
+
+// Persistencia de líneas en localStorage
+function linesStorageKey() {
+  return 'scanner-lines:' + (currentAsset?.symbol || '') + ':' + currentTF;
+}
+function saveLinesToStorage() {
+  try {
+    const data = drawnLines.map(l => ({ id: l.id, price1: l.price1, time1: l.time1, price2: l.price2, time2: l.time2 }));
+    localStorage.setItem(linesStorageKey(), JSON.stringify(data));
+  } catch {}
+}
+function loadLinesFromStorage() {
+  // limpiar las del chart actual
+  drawnLines.forEach(l => { try { chart.removeSeries(l.series); } catch {} });
+  drawnLines = [];
+  try {
+    const raw = localStorage.getItem(linesStorageKey());
+    if (!raw) return;
+    const arr = JSON.parse(raw);
+    arr.forEach(l => drawLine(l.time1, l.price1, l.time2, l.price2, l.id));
+  } catch {}
+}
+
+function drawLine(time1, price1, time2, price2, id = null) {
+  const series = chart.addLineSeries({
+    color: '#f59e0b',
+    lineWidth: 2,
+    priceLineVisible: false,
+    lastValueVisible: false,
+    crosshairMarkerVisible: false,
+  });
+  // Ordenar por tiempo
+  const data = [
+    { time: Math.min(time1, time2), value: time1 < time2 ? price1 : price2 },
+    { time: Math.max(time1, time2), value: time1 < time2 ? price2 : price1 },
+  ];
+  series.setData(data);
+  const lineObj = { id: id || Date.now().toString(36), price1, time1, price2, time2, series };
+  drawnLines.push(lineObj);
+  saveLinesToStorage();
+  return lineObj;
+}
+
+function handleChartClick(param) {
+  if (!drawMode) return;
+  if (!param || !param.time || !param.point) return;
+  const price = candleSeries.coordinateToPrice(param.point.y);
+  if (price == null) return;
+  if (!drawingTemp) {
+    // primer click
+    drawingTemp = { time1: param.time, price1: price };
+  } else {
+    // segundo click: finalizar línea
+    drawLine(drawingTemp.time1, drawingTemp.price1, param.time, price);
+    drawingTemp = null;
+    // desactivar modo dibujo tras completar (más cómodo)
+    toggleDrawMode();
+  }
+}
+
 window.addEventListener('DOMContentLoaded', async () => {
   if (!initSupabaseClient()) return;
   await startAppNoAuth();
