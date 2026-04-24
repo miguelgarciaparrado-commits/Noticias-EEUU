@@ -225,4 +225,736 @@
   @keyframes slide-in { from { opacity: 0; transform: translateX(20px); } to { opacity: 1; transform: translateX(0); } }
   .toast-title { font-size: 12px; font-weight: 600; margin-bottom: 4px; display: flex; justify-content: space-between; gap: 8px; }
   .toast-close { background: none; border: none; color: var(--text-muted); cursor: pointer; font-size: 16px; }
-  .toast-body { font-size: 12px; color: var(--text-muted); font-family: var(--f
+  .toast-body { font-size: 12px; color: var(--text-muted); font-family: var(--font-mono); }
+  @media (max-width: 500px) { .toast-container { top: 10px; right: 10px; left: 10px; max-width: none; } }
+</style>
+</head>
+<body>
+
+<div class="auth-screen" id="auth-screen">
+  <div class="auth-card">
+    <div class="auth-brand">
+      <div class="auth-brand-mark">📊</div>
+      <div><div class="auth-title">Pattern Scanner</div><div class="auth-subtitle">Crypto · Acciones · Alertas RSI por WhatsApp</div></div>
+    </div>
+    <div class="auth-tabs">
+      <button class="auth-tab active" data-mode="signin">Entrar</button>
+      <button class="auth-tab" data-mode="signup">Crear cuenta</button>
+    </div>
+    <div class="auth-error" id="auth-error"></div>
+    <div class="auth-info" id="auth-info"></div>
+    <div class="form-group"><label class="form-label">Email</label><input type="email" class="form-input" id="auth-email" autocomplete="email"></div>
+    <div class="form-group"><label class="form-label">Contraseña</label><input type="password" class="form-input" id="auth-password" autocomplete="current-password"><div class="form-hint" id="auth-pw-hint" style="display:none;">Mínimo 6 caracteres.</div></div>
+    <button class="btn btn-primary btn-full" id="auth-submit">Entrar</button>
+  </div>
+</div>
+
+<div class="app" id="app-shell" style="display:none;">
+  <header>
+    <div class="brand"><div class="brand-mark">📊</div><div><div class="brand-name">Pattern Scanner <span id="symbol-label">—</span></div></div></div>
+    <div class="ticker">
+      <span class="ticker-symbol" id="ticker-sym">—</span>
+      <span class="ticker-price" id="price">—</span>
+      <span class="ticker-change" id="change">—</span>
+    </div>
+    <div class="controls">
+      <select class="asset-select" id="asset-select"></select>
+      <div class="view-group">
+        <button class="view-btn active" data-view="live">En vivo</button>
+        <button class="view-btn" data-view="history">Histórico</button>
+      </div>
+      <div class="tf-group" id="tf-group">
+        <button class="tf-btn" data-tf="15m">15m</button>
+        <button class="tf-btn" data-tf="1h">1H</button>
+        <button class="tf-btn" data-tf="4h">4H</button>
+        <button class="tf-btn active" data-tf="1d">1D</button>
+        <button class="tf-btn" data-tf="1w">1W</button>
+      </div>
+      <button class="icon-btn" id="btn-profile" title="Perfil">👤</button>
+      <div class="user-menu" id="user-menu">
+        <div class="user-avatar" id="user-avatar">?</div>
+        <span class="user-email" id="user-email-text">—</span>
+      </div>
+    </div>
+  </header>
+  <div class="main">
+    <div class="chart-area">
+      <div id="chart"></div>
+      <canvas id="fvg-overlay"></canvas>
+      <div class="loading" id="loading"><span>CARGANDO<span class="loading-dot">.</span><span class="loading-dot">.</span><span class="loading-dot">.</span></span></div>
+    </div>
+    <aside class="sidebar" id="sidebar"></aside>
+  </div>
+  <div class="status-bar">
+    <span class="status-section"><span class="live-dot"></span><span id="data-source-status">—</span></span>
+    <span class="status-section"><span class="wa-dot off" id="wa-dot"></span><span id="wa-status">WhatsApp no configurado</span></span>
+    <span id="last-update">—</span>
+  </div>
+</div>
+
+<div class="toast-container" id="toast-container"></div>
+
+<div class="modal-backdrop" id="modal-profile">
+  <div class="modal">
+    <div class="modal-header"><span class="modal-title">Tu perfil</span><button class="modal-close" data-close>×</button></div>
+    <div class="modal-body">
+      <div class="warning-box">
+        <strong>WhatsApp:</strong> para recibir alertas en tu móvil, envía <code>"I allow callmebot to send me messages"</code> al <strong>+34 644 31 86 52</strong> desde WhatsApp. Te devolverán un APIKEY, pégalo aquí junto con tu número (formato internacional sin +).
+      </div>
+      <div class="form-group"><label class="form-label">Teléfono WhatsApp</label><input type="text" class="form-input" id="prof-phone" placeholder="34612345678"><div class="form-hint">Formato internacional sin +, sin espacios.</div></div>
+      <div class="form-group"><label class="form-label">CallMeBot API Key</label><input type="password" class="form-input" id="prof-apikey" placeholder="1234567"><div class="form-hint">Vacío = usa el APIKEY por defecto del repo.</div></div>
+      <div class="form-group"><label class="form-label">TwelveData API Key (acciones e índices)</label><input type="password" class="form-input" id="prof-td-key" placeholder="abcdef1234..."><div class="form-hint">Gratis en <a href="https://twelvedata.com" target="_blank">twelvedata.com</a>. Necesaria para ver NASDAQ, SPX, AAPL, etc.</div></div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" id="btn-logout">Cerrar sesión</button>
+      <button class="btn btn-primary" id="btn-profile-save">Guardar</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-backdrop" id="modal-detail">
+  <div class="modal">
+    <div class="modal-header"><span class="modal-title">Detalle del patrón</span><button class="modal-close" data-close>×</button></div>
+    <div class="modal-body">
+      <div class="pattern-detail-head" id="detail-head"></div>
+      <div class="form-group"><label class="form-label">Resultado</label>
+        <div class="outcome-selector" id="outcome-selector">
+          <div class="outcome-btn" data-value="pending">Pendiente</div>
+          <div class="outcome-btn" data-value="success">Acierto</div>
+          <div class="outcome-btn" data-value="failure">Falló</div>
+          <div class="outcome-btn" data-value="invalidated">Inválido</div>
+        </div>
+      </div>
+      <div class="form-group"><label class="form-label">Notas</label><textarea class="form-textarea" id="detail-notes"></textarea></div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" data-close>Cancelar</button>
+      <button class="btn btn-primary" id="detail-save">Guardar</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-backdrop" id="modal-alert">
+  <div class="modal">
+    <div class="modal-header"><span class="modal-title" id="alert-title">Nueva alerta RSI</span><button class="modal-close" data-close>×</button></div>
+    <div class="modal-body">
+      <div class="form-group"><label class="form-label">Condición</label>
+        <div class="condition-selector">
+          <div class="condition-btn" data-value="cross_up"><div class="cond-icon">↗</div><div class="cond-label">Cruza al alza</div></div>
+          <div class="condition-btn" data-value="cross_down"><div class="cond-icon">↘</div><div class="cond-label">Cruza a la baja</div></div>
+        </div>
+      </div>
+      <div class="form-group"><label class="form-label">Nivel RSI</label>
+        <div class="slider-wrap"><input type="range" id="alert-level" min="0" max="100" value="70" step="1"><span class="slider-value" id="alert-level-value">70</span></div>
+      </div>
+      <div class="form-group"><label class="form-label">Etiqueta (opcional)</label><input type="text" class="form-input" id="alert-label" placeholder="p.ej. Sobrecompra, short"></div>
+      <div class="form-group"><label class="form-label">Aplica a</label><div style="font-size:12px; color:var(--text-muted); font-family:var(--font-mono);"><span id="alert-context">—</span></div></div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-danger" id="alert-delete" style="margin-right:auto; display:none;">Eliminar</button>
+      <button class="btn btn-ghost" data-close>Cancelar</button>
+      <button class="btn btn-primary" id="alert-save">Guardar</button>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script>
+// ============================================================
+// CONFIG SUPABASE — PEGA TU ANON KEY ABAJO (línea 2)
+// ============================================================
+const SUPABASE_URL = 'https://ifqftuqkdgsepvtqwefp.supabase.co';
+const SUPABASE_ANON_KEY = 'PEGA_AQUI_TU_ANON_KEY';
+// ============================================================
+
+const LIMIT = 300;
+const LS_UI = 'scanner-v5-ui';
+
+let assetsCatalog = [];     // cargado desde tabla assets
+let currentAsset = null;    // objeto asset actual
+let currentTF = '1d';
+let currentView = 'live';
+let candles = [];
+let patterns = [], historyPatterns = [], fvgs = [];
+let chart, candleSeries, rsiSeries;
+let updateTimer = null;
+let supabase = null;
+let currentUser = null;
+let profile = {};
+let rsiPeriod = 14, rsiValues = [], rsiPriceLines = [];
+let alerts = [], lastFiredTimes = {}, isFirstScan = true;
+let detailingPatternId = null, editingAlertId = null;
+
+const PATTERN_CONFIG = {
+  bullEngulfing: { name: 'Envolvente alcista', bias: 'bull', on: true },
+  bearEngulfing: { name: 'Envolvente bajista', bias: 'bear', on: true },
+  morningStar:   { name: 'Estrella de la mañana', bias: 'bull', on: true },
+  eveningStar:   { name: 'Estrella de la tarde', bias: 'bear', on: true },
+  threeWhite:    { name: 'Tres soldados blancos', bias: 'bull', on: true },
+  threeBlack:    { name: 'Tres cuervos negros', bias: 'bear', on: true },
+  bullHarami:    { name: 'Harami alcista', bias: 'bull', on: true },
+  bearHarami:    { name: 'Harami bajista', bias: 'bear', on: true },
+  hammer:        { name: 'Martillo', bias: 'bull', on: true },
+  shootingStar:  { name: 'Estrella fugaz', bias: 'bear', on: true },
+  tweezerBottom: { name: 'Pinzas inferiores', bias: 'bull', on: false },
+  tweezerTop:    { name: 'Pinzas superiores', bias: 'bear', on: false },
+};
+let showFVG = true;
+
+// ============================================================
+function saveUIState() {
+  try { localStorage.setItem(LS_UI, JSON.stringify({ symbol: currentAsset?.symbol, tf: currentTF, showFVG, rsiPeriod, toggles: Object.fromEntries(Object.entries(PATTERN_CONFIG).map(([k,v])=>[k,v.on])) })); } catch {}
+}
+function loadUIState() { try { return JSON.parse(localStorage.getItem(LS_UI) || '{}'); } catch { return {}; } }
+
+// ============================================================
+// AUTH
+// ============================================================
+function initSupabaseClient() {
+  if (!SUPABASE_URL.startsWith('https://') || SUPABASE_ANON_KEY.length < 30 || SUPABASE_ANON_KEY === 'PEGA_AQUI_TU_ANON_KEY') {
+    document.getElementById('auth-error').textContent = 'App no configurada. Edita el HTML y pega SUPABASE_ANON_KEY arriba en <script>.';
+    document.getElementById('auth-error').classList.add('show');
+    return false;
+  }
+  supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+  return true;
+}
+
+async function checkSession() {
+  const { data: { session } } = await supabase.auth.getSession();
+  if (session?.user) { currentUser = session.user; await onSignedIn(); }
+  else showAuthScreen();
+  supabase.auth.onAuthStateChange((e) => { if (e === 'SIGNED_OUT') location.reload(); });
+}
+function showAuthScreen() { document.getElementById('auth-screen').style.display = 'grid'; document.getElementById('app-shell').style.display = 'none'; }
+function hideAuthScreen() { document.getElementById('auth-screen').style.display = 'none'; document.getElementById('app-shell').style.display = 'grid'; }
+
+async function onSignedIn() {
+  hideAuthScreen();
+  document.getElementById('user-email-text').textContent = currentUser.email;
+  document.getElementById('user-avatar').textContent = currentUser.email[0].toUpperCase();
+  await loadProfile();
+  await loadAssets();
+  restoreUIState();
+  initChart();
+  resizeFVGCanvas();
+  setupUI();
+  await loadAlerts();
+  await loadData();
+  updateTimer = setInterval(loadData, 30000);
+}
+
+async function loadProfile() {
+  const { data } = await supabase.from('profiles').select('*').eq('user_id', currentUser.id).maybeSingle();
+  profile = data || {};
+  updateWaStatus();
+}
+function updateWaStatus() {
+  const dot = document.getElementById('wa-dot'), text = document.getElementById('wa-status');
+  if (profile.wa_phone && profile.wa_apikey) { dot.classList.remove('off'); text.textContent = 'WhatsApp activo'; }
+  else if (profile.wa_phone) { dot.classList.remove('off'); text.textContent = 'WhatsApp · APIKEY por defecto'; }
+  else { dot.classList.add('off'); text.textContent = 'WhatsApp no configurado'; }
+}
+
+// ============================================================
+// ASSETS (catálogo dinámico)
+// ============================================================
+async function loadAssets() {
+  const { data, error } = await supabase.from('assets').select('*').eq('active', true).order('sort_order');
+  if (error || !data || data.length === 0) {
+    console.error('No pude cargar assets:', error);
+    assetsCatalog = [{ symbol: 'BTCUSDT', display_name: 'BTC / USDT', data_source: 'binance', binance_symbol: 'BTCUSDT', decimals: 2 }];
+  } else {
+    assetsCatalog = data;
+  }
+  // poblar el select
+  const sel = document.getElementById('asset-select');
+  sel.innerHTML = assetsCatalog.map(a => `<option value="${a.symbol}">${a.display_name}</option>`).join('');
+}
+
+// ============================================================
+// CHART
+// ============================================================
+function initChart() {
+  const c = document.getElementById('chart');
+  chart = LightweightCharts.createChart(c, {
+    layout: { background: { color: '#0a0a0b' }, textColor: '#8a8a94', fontFamily: 'IBM Plex Mono, monospace', fontSize: 11 },
+    grid: { vertLines: { color: '#17171c' }, horzLines: { color: '#17171c' } },
+    crosshair: { mode: LightweightCharts.CrosshairMode.Normal, vertLine: { color: '#33333c', width: 1, style: 2 }, horzLine: { color: '#33333c', width: 1, style: 2 } },
+    rightPriceScale: { borderColor: '#24242b', scaleMargins: { top: 0.05, bottom: 0.28 } },
+    timeScale: { borderColor: '#24242b', timeVisible: true, secondsVisible: false },
+    width: c.clientWidth, height: c.clientHeight,
+  });
+  candleSeries = chart.addCandlestickSeries({ upColor: '#10b981', downColor: '#ef4444', borderUpColor: '#10b981', borderDownColor: '#ef4444', wickUpColor: '#10b981', wickDownColor: '#ef4444' });
+  rsiSeries = chart.addLineSeries({ priceScaleId: 'rsi', color: '#a855f7', lineWidth: 2, priceLineVisible: false, lastValueVisible: true, priceFormat: { type: 'custom', formatter: v => v.toFixed(1) } });
+  chart.priceScale('rsi').applyOptions({ scaleMargins: { top: 0.78, bottom: 0.02 }, borderColor: '#24242b' });
+  new ResizeObserver(() => { chart.applyOptions({ width: c.clientWidth, height: c.clientHeight }); resizeFVGCanvas(); }).observe(c);
+  chart.timeScale().subscribeVisibleTimeRangeChange(drawFVGs);
+}
+
+// ============================================================
+// DATA dispatcher por data_source del asset
+// ============================================================
+async function fetchCandles() {
+  if (!currentAsset) throw new Error('Activo no seleccionado');
+  if (currentAsset.data_source === 'binance') return fetchBinance();
+  if (currentAsset.data_source === 'twelvedata') return fetchTwelveData();
+  throw new Error('Fuente de datos no soportada: ' + currentAsset.data_source);
+}
+
+async function fetchBinance() {
+  document.getElementById('data-source-status').textContent = 'Binance · 30s';
+  const sym = currentAsset.binance_symbol || currentAsset.symbol;
+  const url = `https://api.binance.com/api/v3/klines?symbol=${sym}&interval=${currentTF}&limit=${LIMIT}`;
+  const r = await fetch(url);
+  if (!r.ok) throw new Error('Binance ' + r.status);
+  const rows = await r.json();
+  return rows.map(k => ({ time: Math.floor(k[0]/1000), open: +k[1], high: +k[2], low: +k[3], close: +k[4], volume: +k[5] }));
+}
+
+async function fetchTwelveData() {
+  document.getElementById('data-source-status').textContent = 'TwelveData · 30s';
+  if (!profile.td_api_key) throw new Error('Configura TwelveData API key en tu perfil 👤');
+  const TF_MAP = { '15m': '15min', '1h': '1h', '4h': '4h', '1d': '1day', '1w': '1week' };
+  const interval = TF_MAP[currentTF] || '1day';
+  const sym = currentAsset.twelvedata_symbol || currentAsset.symbol;
+  const url = `https://api.twelvedata.com/time_series?symbol=${sym}&interval=${interval}&outputsize=${LIMIT}&apikey=${profile.td_api_key}`;
+  const r = await fetch(url);
+  if (!r.ok) throw new Error('TwelveData ' + r.status);
+  const j = await r.json();
+  if (j.status === 'error') throw new Error(j.message || 'TwelveData error');
+  if (!j.values) throw new Error('Sin datos de TwelveData');
+  return j.values.map(v => ({ time: Math.floor(new Date(v.datetime + 'Z').getTime()/1000), open: +v.open, high: +v.high, low: +v.low, close: +v.close, volume: +(v.volume||0) })).reverse();
+}
+
+async function loadData() {
+  document.getElementById('loading').classList.remove('hidden');
+  try {
+    candles = await fetchCandles();
+    candleSeries.setData(candles);
+    computeAndRenderRSI();
+    runAnalysis();
+    checkAlerts();
+    isFirstScan = false;
+    await syncPatternsToDb();
+    await syncFVGsToDb();
+    updateTicker();
+    document.getElementById('last-update').textContent = new Date().toLocaleTimeString();
+  } catch (e) {
+    console.error(e);
+    document.getElementById('loading').innerHTML = `<span style="color:var(--bear); text-align:center; padding:0 20px;">${e.message}</span>`;
+    return;
+  }
+  document.getElementById('loading').classList.add('hidden');
+}
+
+function updateTicker() {
+  if (!candles.length || !currentAsset) return;
+  const last = candles[candles.length-1], prev = candles[candles.length-2] || last;
+  const change = last.close - prev.close, pct = (change / prev.close) * 100;
+  const decimals = currentAsset.decimals ?? 2;
+  const priceEl = document.getElementById('price');
+  const prefix = currentAsset.asset_type === 'crypto' || currentAsset.asset_type === 'stock' ? '$' : '';
+  priceEl.textContent = prefix + last.close.toLocaleString('en-US', { minimumFractionDigits: decimals, maximumFractionDigits: decimals });
+  priceEl.className = 'ticker-price ' + (change >= 0 ? 'up' : 'down');
+  const changeEl = document.getElementById('change');
+  const s = change >= 0 ? '+' : '';
+  changeEl.textContent = `${s}${change.toFixed(decimals)} (${s}${pct.toFixed(2)}%)`;
+  changeEl.className = 'ticker-change ' + (change >= 0 ? 'up' : 'down');
+  document.getElementById('ticker-sym').textContent = currentAsset.display_name;
+  document.getElementById('symbol-label').textContent = currentAsset.display_name;
+}
+
+// ============================================================
+// RSI (Wilder)
+// ============================================================
+function computeRSI(arr, period) {
+  const out = [];
+  if (arr.length < period+1) return out;
+  let g = 0, l = 0;
+  for (let i = 1; i <= period; i++) { const d = arr[i].close - arr[i-1].close; if (d >= 0) g += d; else l += -d; }
+  let avgG = g/period, avgL = l/period, rs = avgL === 0 ? 100 : avgG/avgL;
+  out.push({ time: arr[period].time, value: avgL === 0 ? 100 : 100 - 100/(1+rs) });
+  for (let i = period+1; i < arr.length; i++) {
+    const d = arr[i].close - arr[i-1].close;
+    const gg = d > 0 ? d : 0, ll = d < 0 ? -d : 0;
+    avgG = (avgG*(period-1) + gg)/period; avgL = (avgL*(period-1) + ll)/period;
+    rs = avgL === 0 ? 100 : avgG/avgL;
+    out.push({ time: arr[i].time, value: avgL === 0 ? 100 : 100 - 100/(1+rs) });
+  }
+  return out;
+}
+function computeAndRenderRSI() { rsiValues = computeRSI(candles, rsiPeriod); rsiSeries.setData(rsiValues); renderRsiPriceLines(); }
+function renderRsiPriceLines() {
+  rsiPriceLines.forEach(pl => rsiSeries.removePriceLine(pl)); rsiPriceLines = [];
+  [{p:70,c:'rgba(239,68,68,.5)',t:'70'},{p:50,c:'rgba(138,138,148,.3)',t:'50'},{p:30,c:'rgba(16,185,129,.5)',t:'30'}].forEach(x => rsiPriceLines.push(rsiSeries.createPriceLine({ price: x.p, color: x.c, lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title: x.t })));
+  if (!currentAsset) return;
+  alerts.filter(a => a.active && a.symbol === currentAsset.symbol && a.timeframe === currentTF && a.rsi_period === rsiPeriod).forEach(a => {
+    rsiPriceLines.push(rsiSeries.createPriceLine({ price: +a.level, color: '#f59e0b', lineWidth: 1, lineStyle: 0, axisLabelVisible: true, title: (a.condition === 'cross_up' ? '↗ ' : '↘ ') + (a.label || 'Alerta') }));
+  });
+}
+
+// ============================================================
+// DETECCIÓN PATRONES / FVG
+// ============================================================
+const bd = c => Math.abs(c.close - c.open);
+const uw = c => c.high - Math.max(c.open, c.close);
+const lw = c => Math.min(c.open, c.close) - c.low;
+const iB = c => c.close > c.open, iS = c => c.close < c.open;
+const rg = c => c.high - c.low, mb = c => (c.open + c.close)/2;
+function avgRange(i, n=14) { const f = Math.max(0,i-n); let s=0,c=0; for (let j=f;j<i;j++){s+=rg(candles[j]);c++;} return c?s/c:0; }
+function trendBefore(i, n=5) { if (i<n) return 'none'; const a=candles[i-n].close, b=candles[i-1].close, p=(b-a)/a; if (p<-0.015) return 'down'; if (p>0.015) return 'up'; return 'none'; }
+
+function detectPatterns() {
+  const r = [];
+  for (let i = 2; i < candles.length; i++) {
+    const c0=candles[i-2], c1=candles[i-1], c2=candles[i], avg=avgRange(i), tr=trendBefore(i);
+    if (PATTERN_CONFIG.bullEngulfing.on && tr==='down' && iS(c1) && iB(c2) && c2.open<c1.close && c2.close>c1.open) r.push({time:c2.time, type:'bullEngulfing', ...PATTERN_CONFIG.bullEngulfing});
+    if (PATTERN_CONFIG.bearEngulfing.on && tr==='up' && iB(c1) && iS(c2) && c2.open>c1.close && c2.close<c1.open) r.push({time:c2.time, type:'bearEngulfing', ...PATTERN_CONFIG.bearEngulfing});
+    if (PATTERN_CONFIG.bullHarami.on && tr==='down' && iS(c1) && iB(c2) && bd(c1)>avg*0.8 && c2.open>c1.close && c2.close<c1.open && bd(c2)<bd(c1)*0.6) r.push({time:c2.time, type:'bullHarami', ...PATTERN_CONFIG.bullHarami});
+    if (PATTERN_CONFIG.bearHarami.on && tr==='up' && iB(c1) && iS(c2) && bd(c1)>avg*0.8 && c2.open<c1.close && c2.close>c1.open && bd(c2)<bd(c1)*0.6) r.push({time:c2.time, type:'bearHarami', ...PATTERN_CONFIG.bearHarami});
+    if (PATTERN_CONFIG.tweezerBottom.on && tr==='down' && iS(c1) && iB(c2) && Math.abs(c1.low-c2.low)<avg*0.08) r.push({time:c2.time, type:'tweezerBottom', ...PATTERN_CONFIG.tweezerBottom});
+    if (PATTERN_CONFIG.tweezerTop.on && tr==='up' && iB(c1) && iS(c2) && Math.abs(c1.high-c2.high)<avg*0.08) r.push({time:c2.time, type:'tweezerTop', ...PATTERN_CONFIG.tweezerTop});
+    if (PATTERN_CONFIG.hammer.on && tr==='down' && bd(c2)<rg(c2)*0.35 && lw(c2)>bd(c2)*2 && uw(c2)<bd(c2)*0.5) r.push({time:c2.time, type:'hammer', ...PATTERN_CONFIG.hammer});
+    if (PATTERN_CONFIG.shootingStar.on && tr==='up' && bd(c2)<rg(c2)*0.35 && uw(c2)>bd(c2)*2 && lw(c2)<bd(c2)*0.5) r.push({time:c2.time, type:'shootingStar', ...PATTERN_CONFIG.shootingStar});
+    if (PATTERN_CONFIG.morningStar.on && tr==='down' && iS(c0) && bd(c0)>avg*0.7 && bd(c1)<bd(c0)*0.4 && iB(c2) && bd(c2)>avg*0.6 && c2.close>mb(c0)) r.push({time:c2.time, type:'morningStar', ...PATTERN_CONFIG.morningStar});
+    if (PATTERN_CONFIG.eveningStar.on && tr==='up' && iB(c0) && bd(c0)>avg*0.7 && bd(c1)<bd(c0)*0.4 && iS(c2) && bd(c2)>avg*0.6 && c2.close<mb(c0)) r.push({time:c2.time, type:'eveningStar', ...PATTERN_CONFIG.eveningStar});
+    if (PATTERN_CONFIG.threeWhite.on && tr!=='up' && iB(c0) && iB(c1) && iB(c2) && bd(c0)>avg*0.5 && bd(c1)>avg*0.5 && bd(c2)>avg*0.5 && c1.open>c0.open && c1.open<c0.close && c2.open>c1.open && c2.open<c1.close && c1.close>c0.close && c2.close>c1.close && uw(c1)<bd(c1)*0.3 && uw(c2)<bd(c2)*0.3) r.push({time:c2.time, type:'threeWhite', ...PATTERN_CONFIG.threeWhite});
+    if (PATTERN_CONFIG.threeBlack.on && tr!=='down' && iS(c0) && iS(c1) && iS(c2) && bd(c0)>avg*0.5 && bd(c1)>avg*0.5 && bd(c2)>avg*0.5 && c1.open<c0.open && c1.open>c0.close && c2.open<c1.open && c2.open>c1.close && c1.close<c0.close && c2.close<c1.close && lw(c1)<bd(c1)*0.3 && lw(c2)<bd(c2)*0.3) r.push({time:c2.time, type:'threeBlack', ...PATTERN_CONFIG.threeBlack});
+  }
+  return r;
+}
+
+function detectFVGs() {
+  const r = [];
+  for (let i = 2; i < candles.length; i++) {
+    const c0=candles[i-2], c2=candles[i];
+    if (c0.high < c2.low) {
+      const f = {type:'bull', top:c2.low, bottom:c0.high, startTime:c2.time, fillTime:null};
+      for (let j=i+1; j<candles.length; j++) if (candles[j].low<=f.top) { f.fillTime=candles[j].time; break; }
+      r.push(f);
+    }
+    if (c0.low > c2.high) {
+      const f = {type:'bear', top:c0.low, bottom:c2.high, startTime:c2.time, fillTime:null};
+      for (let j=i+1; j<candles.length; j++) if (candles[j].high>=f.bottom) { f.fillTime=candles[j].time; break; }
+      r.push(f);
+    }
+  }
+  return r;
+}
+
+function drawMarkers() {
+  candleSeries.setMarkers(patterns.map(p => ({ time: p.time, position: p.bias==='bull'?'belowBar':'aboveBar', color: p.bias==='bull'?'#10b981':'#ef4444', shape: p.bias==='bull'?'arrowUp':'arrowDown', text: p.name.split(' ')[0] })));
+}
+function resizeFVGCanvas() {
+  const c = document.getElementById('fvg-overlay'), ct = document.getElementById('chart');
+  c.width = ct.clientWidth; c.height = ct.clientHeight;
+  c.style.width = ct.clientWidth + 'px'; c.style.height = ct.clientHeight + 'px';
+}
+function drawFVGs() {
+  const c = document.getElementById('fvg-overlay'), ctx = c.getContext('2d');
+  ctx.clearRect(0,0,c.width,c.height);
+  if (!showFVG || !candleSeries) return;
+  const ts = chart.timeScale(), lt = candles[candles.length-1]?.time;
+  fvgs.forEach(f => {
+    if (f.fillTime) return;
+    const x1 = ts.timeToCoordinate(f.startTime), x2r = ts.timeToCoordinate(lt);
+    const x2 = x2r !== null ? x2r + 20 : c.width;
+    const yT = candleSeries.priceToCoordinate(f.top), yB = candleSeries.priceToCoordinate(f.bottom);
+    if (x1===null || yT===null || yB===null) return;
+    ctx.fillStyle = f.type==='bull' ? 'rgba(16,185,129,.12)' : 'rgba(239,68,68,.12)';
+    ctx.fillRect(x1, yT, x2-x1, yB-yT);
+    ctx.strokeStyle = f.type==='bull' ? 'rgba(16,185,129,.4)' : 'rgba(239,68,68,.4)';
+    ctx.lineWidth = 1; ctx.setLineDash([4,3]);
+    ctx.strokeRect(x1, yT, x2-x1, yB-yT); ctx.setLineDash([]);
+  });
+}
+function runAnalysis() { patterns = detectPatterns(); fvgs = detectFVGs(); drawMarkers(); drawFVGs(); renderSidebar(); }
+
+// ============================================================
+// SYNC
+// ============================================================
+async function syncPatternsToDb() {
+  if (!supabase || patterns.length === 0 || !currentAsset) return;
+  const rows = patterns.map(p => { const c = candles.find(x => x.time === p.time) || candles[candles.length-1]; return { user_id: currentUser.id, symbol: currentAsset.symbol, timeframe: currentTF, candle_time: p.time, pattern_type: p.type, pattern_name: p.name, bias: p.bias, price_at_detection: c.close }; });
+  try { await supabase.from('detected_patterns').upsert(rows, { onConflict: 'user_id,symbol,timeframe,candle_time,pattern_type', ignoreDuplicates: true }); } catch(e){ console.error(e); }
+}
+async function syncFVGsToDb() {
+  if (!supabase || fvgs.length === 0 || !currentAsset) return;
+  const rows = fvgs.map(f => ({ user_id: currentUser.id, symbol: currentAsset.symbol, timeframe: currentTF, start_time: f.startTime, fvg_type: f.type, top_price: f.top, bottom_price: f.bottom, fill_time: f.fillTime || null, filled_at: f.fillTime ? new Date(f.fillTime*1000).toISOString() : null }));
+  try { await supabase.from('tracked_fvgs').upsert(rows, { onConflict: 'user_id,symbol,timeframe,start_time,fvg_type' }); } catch(e){ console.error(e); }
+}
+async function loadHistoryFromDb() {
+  if (!currentAsset) return { patterns: [] };
+  try { const { data } = await supabase.from('detected_patterns').select('*').eq('symbol', currentAsset.symbol).eq('timeframe', currentTF).order('candle_time',{ascending:false}).limit(500); historyPatterns = data || []; return { patterns: historyPatterns }; } catch { historyPatterns = []; return { patterns: [] }; }
+}
+async function updatePatternOutcome(id, outcome, notes) { try { const { error } = await supabase.from('detected_patterns').update({ outcome, notes, reviewed_at: new Date().toISOString() }).eq('id', id); return !error; } catch { return false; } }
+async function loadAlerts() { try { const { data } = await supabase.from('rsi_alerts').select('*').order('created_at',{ascending:false}); alerts = data || []; } catch { alerts = []; } }
+async function saveAlert(d) {
+  try {
+    if (d.id) { await supabase.from('rsi_alerts').update({ level: d.level, condition: d.condition, label: d.label, rsi_period: d.rsi_period, active: true }).eq('id', d.id); }
+    else { await supabase.from('rsi_alerts').insert({ user_id: currentUser.id, symbol: d.symbol, timeframe: d.timeframe, rsi_period: d.rsi_period, level: d.level, condition: d.condition, label: d.label, active: true }); }
+    await loadAlerts(); return true;
+  } catch (e) { alert('Error: ' + e.message); return false; }
+}
+async function deleteAlert(id) { try { await supabase.from('rsi_alerts').delete().eq('id', id); alerts = alerts.filter(a => a.id !== id); return true; } catch { return false; } }
+
+// ============================================================
+// ALERTS
+// ============================================================
+function checkAlerts() {
+  if (rsiValues.length < 2 || alerts.length === 0 || !currentAsset) return;
+  const lp = rsiValues[rsiValues.length-1], pp = rsiValues[rsiValues.length-2];
+  alerts.forEach(a => {
+    if (!a.active || a.symbol !== currentAsset.symbol || a.timeframe !== currentTF || a.rsi_period !== rsiPeriod) return;
+    let fired = false;
+    if (a.condition === 'cross_up') fired = pp.value < +a.level && lp.value >= +a.level;
+    if (a.condition === 'cross_down') fired = pp.value > +a.level && lp.value <= +a.level;
+    if (!fired || lastFiredTimes[a.id] === lp.time) return;
+    lastFiredTimes[a.id] = lp.time;
+    if (isFirstScan) return;
+    showToast(a, lp);
+  });
+}
+function showToast(a, rp) {
+  const price = candles[candles.length-1]?.close || 0;
+  const dir = a.condition === 'cross_up' ? '↗' : '↘';
+  const title = `${dir} RSI ${a.condition === 'cross_up' ? 'cruzó AL ALZA' : 'cruzó A LA BAJA'} ${a.level}`;
+  const body = `${a.label || ''}${a.label?' · ':''}RSI ${rp.value.toFixed(1)} · ${currentAsset.display_name} ${(+price).toLocaleString('en-US',{minimumFractionDigits:2})}`;
+  const c = document.getElementById('toast-container'), t = document.createElement('div');
+  t.className = 'toast ' + (a.condition === 'cross_up' ? 'bull' : 'bear');
+  t.innerHTML = `<div class="toast-title"><span>${title}</span><button class="toast-close">×</button></div><div class="toast-body">${body}<br><em style="color:var(--text-dim);">WhatsApp llegará en breve si está configurado.</em></div>`;
+  c.appendChild(t);
+  t.querySelector('.toast-close').onclick = () => { t.classList.add('fading'); setTimeout(()=>t.remove(),300); };
+  setTimeout(()=>{ t.classList.add('fading'); setTimeout(()=>t.remove(),300); }, 12000);
+}
+
+// ============================================================
+// SIDEBAR
+// ============================================================
+function renderSidebar() { const el = document.getElementById('sidebar'); if (currentView === 'live') renderLive(el); else renderHistory(el); }
+
+function renderLive(el) {
+  const cur = rsiValues.length ? rsiValues[rsiValues.length-1].value : null;
+  const cls = cur == null ? 'neutral' : cur >= 70 ? 'overbought' : cur <= 30 ? 'oversold' : 'neutral';
+  const zone = cur == null ? '—' : cur >= 70 ? 'SOBRECOMPRA' : cur <= 30 ? 'SOBREVENTA' : 'NEUTRAL';
+  const bull = patterns.filter(p => p.bias==='bull').length, bear = patterns.filter(p => p.bias==='bear').length;
+  const openF = fvgs.filter(f => !f.fillTime).length;
+  const my = currentAsset ? alerts.filter(a => a.symbol === currentAsset.symbol && a.timeframe === currentTF && a.rsi_period === rsiPeriod) : [];
+  el.innerHTML = `
+    <div class="panel">
+      <div class="panel-title">RSI (${rsiPeriod})</div>
+      <div class="rsi-display">
+        <div><div class="rsi-current-value ${cls}">${cur != null ? cur.toFixed(1) : '—'}</div><div class="rsi-label">${currentAsset?.display_name || '—'} · ${currentTF}</div></div>
+        <span class="rsi-zone ${cls}">${zone}</span>
+      </div>
+      <div class="rsi-period-row"><span>Periodo</span><input type="number" class="period-input" id="rsi-period-input" min="2" max="100" value="${rsiPeriod}"></div>
+    </div>
+    <div class="panel"><div class="panel-title">Alertas RSI <span class="panel-count">${my.length}</span><span class="panel-action" id="btn-new-alert">+ Nueva</span></div><div class="alert-list" id="alert-list"></div></div>
+    <div class="panel"><div class="panel-title">Estadísticas</div><div class="stats"><div class="stat"><div class="stat-label">Alcistas</div><div class="stat-value bull">${bull}</div></div><div class="stat"><div class="stat-label">Bajistas</div><div class="stat-value bear">${bear}</div></div><div class="stat"><div class="stat-label">FVG abiertos</div><div class="stat-value accent">${openF}</div></div><div class="stat"><div class="stat-label">Velas</div><div class="stat-value">${candles.length}</div></div></div></div>
+    <div class="panel"><div class="panel-title">Patrones</div><div class="toggle-grid" id="toggles"></div></div>
+    <div class="panel"><div class="panel-title">FVG</div><div class="legend-row"><span class="legend-box bull"></span><span>FVG alcista sin llenar</span></div><div class="legend-row"><span class="legend-box bear"></span><span>FVG bajista sin llenar</span></div><div class="toggle ${showFVG?'on':''}" id="fvg-toggle" style="margin-top:8px;"><span class="toggle-dot"></span><span>Mostrar FVG</span></div></div>
+    <div class="panel" style="flex:1;"><div class="panel-title">Detectados <span class="panel-count">${patterns.length}</span></div><div class="pattern-list" id="pattern-list"></div></div>`;
+  document.getElementById('rsi-period-input').addEventListener('change', e => { rsiPeriod = Math.max(2, Math.min(100, +e.target.value || 14)); e.target.value = rsiPeriod; computeAndRenderRSI(); saveUIState(); renderSidebar(); });
+  document.getElementById('btn-new-alert').addEventListener('click', () => openAlertModal());
+  document.getElementById('fvg-toggle').addEventListener('click', () => { showFVG = !showFVG; document.getElementById('fvg-toggle').classList.toggle('on'); drawFVGs(); saveUIState(); });
+  renderAlertList(my); renderToggles(); renderPatternList(patterns, false);
+}
+
+function renderAlertList(my) {
+  const c = document.getElementById('alert-list'); if (!c) return;
+  if (my.length === 0) { c.innerHTML = '<div class="empty">Ninguna alerta activa.</div>'; return; }
+  c.innerHTML = my.map(a => `<div class="alert-item ${a.active?'':'inactive'}" data-id="${a.id}"><div class="alert-item-head"><span class="alert-level">${a.condition==='cross_up'?'↗':'↘'} ${(+a.level).toFixed(0)}</span><span class="alert-label">${a.label||(a.condition==='cross_up'?'Al alza':'A la baja')}</span><button class="alert-delete" data-del="${a.id}">×</button></div><div class="alert-meta"><span>RSI(${a.rsi_period})</span>${a.trigger_count?`<span>· ${a.trigger_count} disparos</span>`:''}</div></div>`).join('');
+  c.querySelectorAll('.alert-item').forEach(el => el.addEventListener('click', e => { if (!e.target.closest('.alert-delete')) openAlertModal(+el.dataset.id); }));
+  c.querySelectorAll('.alert-delete').forEach(b => b.addEventListener('click', async e => { e.stopPropagation(); if (confirm('¿Eliminar alerta?')) { await deleteAlert(+b.dataset.del); renderSidebar(); renderRsiPriceLines(); } }));
+}
+
+async function renderHistory(el) {
+  el.innerHTML = `<div class="panel"><div class="empty">Cargando…</div></div>`;
+  const { patterns: h } = await loadHistoryFromDb();
+  const byType = {};
+  h.forEach(p => { if (!byType[p.pattern_type]) byType[p.pattern_type] = {t:0,s:0,f:0,n:p.pattern_name}; byType[p.pattern_type].t++; if (p.outcome==='success') byType[p.pattern_type].s++; if (p.outcome==='failure') byType[p.pattern_type].f++; });
+  const rows = Object.entries(byType).filter(([,v])=>v.s+v.f>0).sort((a,b)=>b[1].t-a[1].t).map(([,v])=>{ const r=v.s+v.f, pct=(v.s/r)*100, cl=pct>=60?'':pct>=45?'mid':'low'; return `<div class="rate-row"><span>${v.n}</span><span class="rate-bar-wrap"><span class="rate-bar ${cl}" style="width:${pct}%"></span></span><span class="rate-pct">${pct.toFixed(0)}% · ${r}/${v.t}</span></div>`; }).join('');
+  el.innerHTML = `
+    <div class="panel"><div class="panel-title">Histórico · ${currentAsset?.display_name} · ${currentTF}</div><div class="stats"><div class="stat"><div class="stat-label">Total</div><div class="stat-value">${h.length}</div></div><div class="stat"><div class="stat-label">Pendientes</div><div class="stat-value accent">${h.filter(p=>p.outcome==='pending').length}</div></div><div class="stat"><div class="stat-label">Aciertos</div><div class="stat-value bull">${h.filter(p=>p.outcome==='success').length}</div></div><div class="stat"><div class="stat-label">Fallos</div><div class="stat-value bear">${h.filter(p=>p.outcome==='failure').length}</div></div></div></div>
+    ${rows?`<div class="panel"><div class="panel-title">Tasa de acierto</div><div class="success-rate-list">${rows}</div></div>`:''}
+    <div class="panel" style="flex:1;"><div class="panel-title">Patrones <span class="panel-count">${h.length}</span></div><div class="pattern-list" id="pattern-list"></div></div>`;
+  renderPatternList(h, true);
+}
+
+function renderPatternList(items, hist) {
+  const list = document.getElementById('pattern-list'); if (!list) return;
+  if (items.length === 0) { list.innerHTML = '<div class="empty">Sin patrones.</div>'; return; }
+  const s = hist ? items : [...items].sort((a,b)=>b.time-a.time);
+  list.innerHTML = s.slice(0,80).map(p => {
+    const t = hist?p.candle_time:p.time, d = new Date(t*1000);
+    const ds = d.toLocaleDateString('es-ES',{day:'2-digit',month:'short'}), ts = d.toLocaleTimeString('es-ES',{hour:'2-digit',minute:'2-digit'});
+    const name = hist?p.pattern_name:p.name;
+    const badge = hist?`<span class="outcome-tag ${p.outcome}">${({pending:'Pendiente',success:'Acierto',failure:'Falló',invalidated:'Inválido'})[p.outcome]}</span>`:'';
+    return `<div class="pattern-item ${p.bias}" ${hist?`data-id="${p.id}"`:`data-time="${p.time}"`}><div class="pattern-item-head"><span class="pattern-item-name">${name}</span><span class="pattern-item-time">${ds}</span></div><div class="pattern-item-meta"><span class="pattern-tag ${p.bias}">${p.bias==='bull'?'Alcista':'Bajista'}</span>${badge}<span>${ts}</span></div></div>`;
+  }).join('');
+  list.querySelectorAll('.pattern-item').forEach(el => el.addEventListener('click', () => {
+    if (hist) openDetailModal(+el.dataset.id);
+    else { const t = +el.dataset.time; chart.timeScale().setVisibleRange({ from: t-15*86400, to: t+10*86400 }); setTimeout(drawFVGs, 50); }
+  }));
+}
+
+function renderToggles() {
+  const c = document.getElementById('toggles'); if (!c) return;
+  c.innerHTML = Object.entries(PATTERN_CONFIG).map(([k,v]) => `<div class="toggle ${v.on?'on':''}" data-key="${k}"><span class="toggle-dot"></span><span>${v.name}</span></div>`).join('');
+  c.querySelectorAll('.toggle').forEach(el => el.addEventListener('click', () => { PATTERN_CONFIG[el.dataset.key].on = !PATTERN_CONFIG[el.dataset.key].on; el.classList.toggle('on'); runAnalysis(); saveUIState(); }));
+}
+
+// ============================================================
+// MODALES
+// ============================================================
+function openModal(id) { document.getElementById(id).classList.add('open'); }
+function closeModal(id) { document.getElementById(id).classList.remove('open'); }
+
+function openDetailModal(id) {
+  const p = historyPatterns.find(x => x.id === id); if (!p) return;
+  detailingPatternId = id;
+  const h = document.getElementById('detail-head'); h.className = 'pattern-detail-head ' + p.bias;
+  const d = new Date(p.candle_time*1000);
+  h.innerHTML = `<div class="row"><span>Patrón</span><strong>${p.pattern_name}</strong></div><div class="row"><span>Par · TF</span><strong>${p.symbol} · ${p.timeframe}</strong></div><div class="row"><span>Fecha</span><strong>${d.toLocaleString('es-ES')}</strong></div><div class="row"><span>Precio</span><strong>${(+p.price_at_detection).toLocaleString('en-US',{minimumFractionDigits:2})}</strong></div>`;
+  document.getElementById('detail-notes').value = p.notes || '';
+  document.querySelectorAll('#outcome-selector .outcome-btn').forEach(b => { b.classList.remove('selected','pending','success','failure','invalidated'); if (b.dataset.value === (p.outcome||'pending')) b.classList.add('selected', p.outcome||'pending'); });
+  openModal('modal-detail');
+}
+
+function openAlertModal(id) {
+  editingAlertId = id || null;
+  const ex = editingAlertId ? alerts.find(a => a.id === editingAlertId) : null;
+  document.getElementById('alert-title').textContent = ex ? 'Editar alerta' : 'Nueva alerta RSI';
+  document.getElementById('alert-delete').style.display = ex ? 'inline-block' : 'none';
+  const lvl = ex ? +ex.level : 70;
+  document.getElementById('alert-level').value = lvl; document.getElementById('alert-level-value').textContent = lvl;
+  document.getElementById('alert-label').value = ex?.label || '';
+  const cond = ex?.condition || 'cross_up';
+  document.querySelectorAll('#modal-alert .condition-btn').forEach(b => b.classList.toggle('selected', b.dataset.value === cond));
+  document.getElementById('alert-context').textContent = `${currentAsset?.display_name} · ${currentTF} · RSI(${rsiPeriod})`;
+  openModal('modal-alert');
+}
+
+// ============================================================
+// UI SETUP
+// ============================================================
+function setupUI() {
+  document.querySelectorAll('.modal-backdrop').forEach(bd => bd.addEventListener('click', e => { if (e.target === bd) bd.classList.remove('open'); }));
+  document.querySelectorAll('[data-close]').forEach(b => b.addEventListener('click', () => b.closest('.modal-backdrop').classList.remove('open')));
+
+  document.getElementById('asset-select').addEventListener('change', e => {
+    currentAsset = assetsCatalog.find(a => a.symbol === e.target.value);
+    isFirstScan = true; saveUIState();
+    loadData().then(() => { renderRsiPriceLines(); if (currentView === 'history') renderSidebar(); });
+  });
+  document.querySelectorAll('.tf-btn').forEach(b => b.addEventListener('click', () => {
+    document.querySelectorAll('.tf-btn').forEach(x => x.classList.remove('active')); b.classList.add('active');
+    currentTF = b.dataset.tf; isFirstScan = true; saveUIState();
+    loadData().then(() => { renderRsiPriceLines(); if (currentView === 'history') renderSidebar(); });
+  }));
+  document.querySelectorAll('.view-btn').forEach(b => b.addEventListener('click', () => {
+    document.querySelectorAll('.view-btn').forEach(x => x.classList.remove('active')); b.classList.add('active');
+    currentView = b.dataset.view; renderSidebar();
+  }));
+
+  document.getElementById('btn-profile').addEventListener('click', () => {
+    document.getElementById('prof-phone').value = profile.wa_phone || '';
+    document.getElementById('prof-apikey').value = profile.wa_apikey || '';
+    document.getElementById('prof-td-key').value = profile.td_api_key || '';
+    openModal('modal-profile');
+  });
+  document.getElementById('btn-profile-save').addEventListener('click', async () => {
+    const phone = document.getElementById('prof-phone').value.trim().replace(/\D/g,'');
+    const apikey = document.getElementById('prof-apikey').value.trim();
+    const tdKey = document.getElementById('prof-td-key').value.trim();
+    const { error } = await supabase.from('profiles').upsert({ user_id: currentUser.id, wa_phone: phone, wa_apikey: apikey, td_api_key: tdKey, updated_at: new Date().toISOString() });
+    if (error) alert('Error: ' + error.message);
+    else { profile = { ...profile, wa_phone: phone, wa_apikey: apikey, td_api_key: tdKey }; updateWaStatus(); closeModal('modal-profile'); loadData(); }
+  });
+  document.getElementById('btn-logout').addEventListener('click', async () => { if (confirm('¿Cerrar sesión?')) await supabase.auth.signOut(); });
+  document.getElementById('user-menu').addEventListener('click', () => document.getElementById('btn-profile').click());
+
+  document.querySelectorAll('#outcome-selector .outcome-btn').forEach(b => b.addEventListener('click', () => {
+    document.querySelectorAll('#outcome-selector .outcome-btn').forEach(x => x.classList.remove('selected','pending','success','failure','invalidated'));
+    b.classList.add('selected', b.dataset.value);
+  }));
+  document.getElementById('detail-save').addEventListener('click', async () => {
+    const s = document.querySelector('#outcome-selector .outcome-btn.selected');
+    const ok = await updatePatternOutcome(detailingPatternId, s ? s.dataset.value : 'pending', document.getElementById('detail-notes').value);
+    if (ok) { closeModal('modal-detail'); if (currentView === 'history') renderSidebar(); }
+  });
+
+  document.getElementById('alert-level').addEventListener('input', e => document.getElementById('alert-level-value').textContent = e.target.value);
+  document.querySelectorAll('#modal-alert .condition-btn').forEach(b => b.addEventListener('click', () => {
+    document.querySelectorAll('#modal-alert .condition-btn').forEach(x => x.classList.remove('selected'));
+    b.classList.add('selected');
+  }));
+  document.getElementById('alert-save').addEventListener('click', async () => {
+    const cs = document.querySelector('#modal-alert .condition-btn.selected');
+    if (!cs) { alert('Selecciona condición'); return; }
+    const ok = await saveAlert({ id: editingAlertId, symbol: currentAsset.symbol, timeframe: currentTF, rsi_period: rsiPeriod, level: +document.getElementById('alert-level').value, condition: cs.dataset.value, label: document.getElementById('alert-label').value.trim() });
+    if (ok) { closeModal('modal-alert'); renderSidebar(); renderRsiPriceLines(); }
+  });
+  document.getElementById('alert-delete').addEventListener('click', async () => {
+    if (editingAlertId && confirm('¿Eliminar?')) { await deleteAlert(editingAlertId); closeModal('modal-alert'); renderSidebar(); renderRsiPriceLines(); }
+  });
+}
+
+function restoreUIState() {
+  const st = loadUIState();
+  const defaultAsset = st.symbol && assetsCatalog.find(a => a.symbol === st.symbol);
+  currentAsset = defaultAsset || assetsCatalog[0];
+  if (currentAsset) document.getElementById('asset-select').value = currentAsset.symbol;
+  if (st.tf) { currentTF = st.tf; document.querySelectorAll('.tf-btn').forEach(b => b.classList.toggle('active', b.dataset.tf === currentTF)); }
+  if (typeof st.showFVG === 'boolean') showFVG = st.showFVG;
+  if (st.rsiPeriod) rsiPeriod = st.rsiPeriod;
+  if (st.toggles) Object.entries(st.toggles).forEach(([k,v]) => { if (PATTERN_CONFIG[k]) PATTERN_CONFIG[k].on = v; });
+}
+
+// ============================================================
+// AUTH HANDLERS
+// ============================================================
+function setupAuthScreen() {
+  let mode = 'signin';
+  document.querySelectorAll('.auth-tab').forEach(t => t.addEventListener('click', () => {
+    document.querySelectorAll('.auth-tab').forEach(x => x.classList.remove('active')); t.classList.add('active');
+    mode = t.dataset.mode;
+    document.getElementById('auth-submit').textContent = mode === 'signin' ? 'Entrar' : 'Crear cuenta';
+    document.getElementById('auth-pw-hint').style.display = mode === 'signup' ? 'block' : 'none';
+    document.getElementById('auth-error').classList.remove('show'); document.getElementById('auth-info').classList.remove('show');
+  }));
+  document.getElementById('auth-submit').addEventListener('click', async () => {
+    const email = document.getElementById('auth-email').value.trim(), password = document.getElementById('auth-password').value;
+    if (!email || !password) { const e = document.getElementById('auth-error'); e.textContent = 'Email y contraseña obligatorios'; e.classList.add('show'); return; }
+    if (mode === 'signup' && password.length < 6) { const e = document.getElementById('auth-error'); e.textContent = 'Contraseña mínimo 6 caracteres'; e.classList.add('show'); return; }
+    document.getElementById('auth-error').classList.remove('show'); document.getElementById('auth-info').classList.remove('show');
+    const btn = document.getElementById('auth-submit'); btn.disabled = true; const orig = btn.textContent; btn.textContent = '…';
+    try {
+      if (mode === 'signup') {
+        const { data, error } = await supabase.auth.signUp({ email, password });
+        if (error) throw error;
+        if (data?.user && !data?.session) { const i = document.getElementById('auth-info'); i.textContent = 'Cuenta creada. Revisa email para confirmar, luego entra.'; i.classList.add('show'); }
+        else if (data?.session) { currentUser = data.user; await onSignedIn(); }
+      } else {
+        const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+        if (error) throw error;
+        currentUser = data.user; await onSignedIn();
+      }
+    } catch (e) { const er = document.getElementById('auth-error'); er.textContent = e.message; er.classList.add('show'); }
+    finally { btn.disabled = false; btn.textContent = orig; }
+  });
+  document.getElementById('auth-password').addEventListener('keydown', e => { if (e.key === 'Enter') document.getElementById('auth-submit').click(); });
+}
+
+// ============================================================
+window.addEventListener('DOMContentLoaded', async () => {
+  setupAuthScreen();
+  if (!initSupabaseClient()) return;
+  await checkSession();
+});
+window.addEventListener('resize', resizeFVGCanvas);
+</script>
+</body>
+</html>
