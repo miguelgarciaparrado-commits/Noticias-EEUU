@@ -396,6 +396,9 @@ let profile = {};
 let rsiPeriod = 14, rsiValues = [], rsiPriceLines = [];
 let alerts = [], lastFiredTimes = {}, isFirstScan = true;
 let previousOpenFVGs = new Set();  // para detectar FVGs que se acaban de llenar
+let divergences = [];          // detectadas en sesión actual
+let divergenceLines = [];      // series del chart
+let divergenceAlertActive = false;  // toggle global
 let detailingPatternId = null, editingAlertId = null;
 
 const PATTERN_CONFIG = {
@@ -662,7 +665,8 @@ async function loadData() {
     if (isFirstScan) chart.timeScale().fitContent();
     openPriceWS();
     computeAndRenderRSI();
-    runAnalysis();
+    await loadDivergenceAlertState();
+    await runAnalysis();
     checkAlerts();
     isFirstScan = false;
     await syncPatternsToDb();
@@ -832,10 +836,11 @@ function drawFVGs() {
     ctx.strokeRect(x1, yT, x2-x1, yB-yT); ctx.setLineDash([]);
   });
 }
-function runAnalysis() {
+async function runAnalysis() {
   patterns = detectPatterns();
   const previousFvgs = fvgs;
   fvgs = detectFVGs();
+  await runDivergenceDetection();
   // Detectar FVG recién llenados: los que estaban abiertos en el anterior análisis y ahora están cerrados
   if (!isFirstScan && previousFvgs.length > 0) {
     const newlyFilled = [];
@@ -938,13 +943,15 @@ function renderLive(el) {
         <span class="rsi-zone ${cls}">${zone}</span>
       </div>
       <div class="rsi-period-row"><span>Periodo</span><input type="number" class="period-input" id="rsi-period-input" min="2" max="100" value="${rsiPeriod}"></div>
+      <div class="toggle ${divergenceAlertActive ? 'on' : ''}" id="div-alert-toggle" style="margin-top:8px;"><span class="toggle-dot"></span><span>Vigilar divergencias + WhatsApp</span></div>
     </div>
     <div class="panel"><div class="panel-title">Alertas RSI <span class="panel-count">${my.length}</span><span class="panel-action" id="btn-new-alert">+ Nueva</span></div><div class="alert-list" id="alert-list"></div></div>
     <div class="panel"><div class="panel-title">Estadísticas</div><div class="stats"><div class="stat"><div class="stat-label">Alcistas</div><div class="stat-value bull">${bull}</div></div><div class="stat"><div class="stat-label">Bajistas</div><div class="stat-value bear">${bear}</div></div><div class="stat"><div class="stat-label">FVG abiertos</div><div class="stat-value accent">${openF}</div></div><div class="stat"><div class="stat-label">Velas</div><div class="stat-value">${candles.length}</div></div></div></div>
     <div class="panel"><div class="panel-title">Patrones</div><div class="toggle-grid" id="toggles"></div></div>
     <div class="panel"><div class="panel-title">FVG</div><div class="legend-row"><span class="legend-box bull"></span><span>FVG alcista sin llenar</span></div><div class="legend-row"><span class="legend-box bear"></span><span>FVG bajista sin llenar</span></div><div class="toggle ${showFVG?'on':''}" id="fvg-toggle" style="margin-top:8px;"><span class="toggle-dot"></span><span>Mostrar FVG</span></div></div>
     <div class="panel" style="flex:1;"><div class="panel-title">Detectados <span class="panel-count">${patterns.length}</span></div><div class="pattern-list" id="pattern-list"></div></div>`;
-  document.getElementById('rsi-period-input').addEventListener('change', e => { rsiPeriod = Math.max(2, Math.min(100, +e.target.value || 14)); e.target.value = rsiPeriod; computeAndRenderRSI(); saveUIState(); renderSidebar(); });
+  document.getElementById('rsi-period-input').addEventListener('change', async e => { rsiPeriod = Math.max(2, Math.min(100, +e.target.value || 14)); e.target.value = rsiPeriod; computeAndRenderRSI(); knownDivergenceKeys = new Set(); await loadDivergenceAlertState(); await runAnalysis(); saveUIState(); renderSidebar(); });
+  document.getElementById('div-alert-toggle').addEventListener('click', toggleDivergenceAlert);
   document.getElementById('btn-new-alert').addEventListener('click', () => openAlertModal());
   document.getElementById('fvg-toggle').addEventListener('click', () => { showFVG = !showFVG; document.getElementById('fvg-toggle').classList.toggle('on'); drawFVGs(); saveUIState(); });
   renderAlertList(my); renderToggles(); renderPatternList(patterns, false);
@@ -1039,6 +1046,8 @@ function setupUI() {
     drawnLines.forEach(l => { try { chart.removeSeries(l.series); } catch {} });
     drawnLines = [];
     clearChannels();
+    clearDivergenceLines();
+    knownDivergenceKeys = new Set();
     loadData().then(() => { renderRsiPriceLines(); loadLinesFromStorage(); if (currentView === 'history') renderSidebar(); });
   });
   document.querySelectorAll('.tf-btn').forEach(b => b.addEventListener('click', () => {
@@ -1047,6 +1056,8 @@ function setupUI() {
     drawnLines.forEach(l => { try { chart.removeSeries(l.series); } catch {} });
     drawnLines = [];
     clearChannels();
+    clearDivergenceLines();
+    knownDivergenceKeys = new Set();
     loadData().then(() => { renderRsiPriceLines(); loadLinesFromStorage(); if (currentView === 'history') renderSidebar(); });
   }));
   document.querySelectorAll('.view-btn').forEach(b => b.addEventListener('click', () => {
@@ -1180,6 +1191,211 @@ function setupAuthScreen() {
 
 // ============================================================
 
+
+
+// ============================================================
+// DETECCIÓN DE DIVERGENCIAS RSI
+// ============================================================
+
+// Buscar pivots (máximos/mínimos locales) con ventana "left/right"
+function findRsiPivots(left = 3, right = 3) {
+  const highPivots = [], lowPivots = [];
+  // alineamos rsiValues con candles: rsiValues empieza en candle[period]
+  const rsiStart = candles.length - rsiValues.length;
+  for (let i = left; i < rsiValues.length - right; i++) {
+    const candleIdx = i + rsiStart;
+    if (candleIdx < 0 || candleIdx >= candles.length) continue;
+    const rsi = rsiValues[i].value;
+    const candle = candles[candleIdx];
+    let isHighPriceAndRsi = true, isLowPriceAndRsi = true;
+    // verificar que sea pivot tanto en precio como en RSI
+    for (let j = i - left; j <= i + right; j++) {
+      if (j === i || j < 0 || j >= rsiValues.length) continue;
+      const otherIdx = j + rsiStart;
+      if (otherIdx < 0 || otherIdx >= candles.length) continue;
+      if (candles[otherIdx].high >= candle.high) isHighPriceAndRsi = false;
+      if (candles[otherIdx].low <= candle.low) isLowPriceAndRsi = false;
+    }
+    if (isHighPriceAndRsi) highPivots.push({ rsiIdx: i, candleIdx, time: candle.time, price: candle.high, rsi });
+    if (isLowPriceAndRsi) lowPivots.push({ rsiIdx: i, candleIdx, time: candle.time, price: candle.low, rsi });
+  }
+  return { highPivots, lowPivots };
+}
+
+// Detectar divergencias regulares entre los últimos N pivots
+function detectDivergences() {
+  if (rsiValues.length < 30) return [];
+  const { highPivots, lowPivots } = findRsiPivots(3, 3);
+  const result = [];
+
+  // Buscar divergencias BAJISTAS (precio HH + RSI LH)
+  // Comparar últimos pares de pivots altos
+  for (let i = 1; i < highPivots.length; i++) {
+    for (let j = 0; j < i; j++) {
+      const p1 = highPivots[j], p2 = highPivots[i];
+      // Distancia mínima entre pivots (evitar ruido): al menos 5 velas
+      if (p2.candleIdx - p1.candleIdx < 5) continue;
+      // Distancia máxima: 50 velas (divergencias muy largas pierden significado)
+      if (p2.candleIdx - p1.candleIdx > 50) continue;
+      // Precio más alto en p2, RSI más bajo en p2 (umbral mínimo)
+      if (p2.price > p1.price * 1.001 && p2.rsi < p1.rsi - 1) {
+        // Y que ambos RSI estén en zona relevante (>50 idealmente sobrecompra)
+        if (p1.rsi > 50 || p2.rsi > 50) {
+          result.push({ type: 'bear', p1, p2 });
+        }
+      }
+    }
+  }
+
+  // Divergencias ALCISTAS (precio LL + RSI HL)
+  for (let i = 1; i < lowPivots.length; i++) {
+    for (let j = 0; j < i; j++) {
+      const p1 = lowPivots[j], p2 = lowPivots[i];
+      if (p2.candleIdx - p1.candleIdx < 5) continue;
+      if (p2.candleIdx - p1.candleIdx > 50) continue;
+      if (p2.price < p1.price * 0.999 && p2.rsi > p1.rsi + 1) {
+        if (p1.rsi < 50 || p2.rsi < 50) {
+          result.push({ type: 'bull', p1, p2 });
+        }
+      }
+    }
+  }
+
+  // Dedup: si hay solapamientos (mismos pivots p2), quedarnos con el más reciente
+  const uniqueByP2 = {};
+  result.forEach(d => {
+    const key = `${d.type}-${d.p2.candleIdx}`;
+    if (!uniqueByP2[key] || uniqueByP2[key].p1.candleIdx < d.p1.candleIdx) {
+      uniqueByP2[key] = d;
+    }
+  });
+  return Object.values(uniqueByP2);
+}
+
+function drawDivergences() {
+  clearDivergenceLines();
+  divergences.forEach(d => {
+    const color = d.type === 'bull' ? '#10b981' : '#ef4444';
+    // Línea en precio conectando pivots
+    const priceLine = chart.addLineSeries({ color, lineWidth: 2, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false, lineStyle: 2 });
+    priceLine.setData([
+      { time: d.p1.time, value: d.p1.price },
+      { time: d.p2.time, value: d.p2.price },
+    ]);
+    divergenceLines.push(priceLine);
+    // Línea en RSI conectando los mismos pivots (visualmente queda abajo)
+    const rsiLine = chart.addLineSeries({ priceScaleId: 'rsi', color, lineWidth: 1, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false, lineStyle: 2 });
+    rsiLine.setData([
+      { time: d.p1.time, value: d.p1.rsi },
+      { time: d.p2.time, value: d.p2.rsi },
+    ]);
+    divergenceLines.push(rsiLine);
+  });
+  // Markers en el precio sobre pivot2 de cada divergencia
+  const existingMarkers = candleSeries.markers ? candleSeries.markers() : [];
+  // Los markers de patrones los mantenemos, añadimos los de divergencias
+  // Nota: setMarkers sobrescribe, así que recalculamos en drawMarkers
+}
+
+function clearDivergenceLines() {
+  divergenceLines.forEach(s => { try { chart.removeSeries(s); } catch {} });
+  divergenceLines = [];
+}
+
+// Cache para detectar divergencias NUEVAS y no spamear toasts
+let knownDivergenceKeys = new Set();
+function divergenceKey(d) {
+  return `${d.type}-${d.p1.time}-${d.p2.time}`;
+}
+
+async function runDivergenceDetection() {
+  const newDivs = detectDivergences();
+  divergences = newDivs;
+  drawDivergences();
+
+  if (!isFirstScan) {
+    // Detectar las que son NUEVAS respecto al escaneo anterior
+    const newKeys = new Set(newDivs.map(divergenceKey));
+    const freshOnes = newDivs.filter(d => !knownDivergenceKeys.has(divergenceKey(d)));
+    for (const d of freshOnes) {
+      showDivergenceToast(d);
+      // Guardar en DB si está activa la alerta
+      if (divergenceAlertActive) {
+        await saveDivergenceToDb(d);
+      }
+    }
+    knownDivergenceKeys = newKeys;
+  } else {
+    knownDivergenceKeys = new Set(newDivs.map(divergenceKey));
+  }
+}
+
+function showDivergenceToast(d) {
+  const c = document.getElementById('toast-container'), t = document.createElement('div');
+  t.className = 'toast ' + (d.type === 'bull' ? 'bull' : 'bear');
+  const icon = d.type === 'bull' ? '📈' : '📉';
+  const title = `${icon} Divergencia ${d.type === 'bull' ? 'ALCISTA' : 'BAJISTA'}`;
+  const decimals = currentAsset?.decimals ?? 2;
+  t.innerHTML = `<div class="toast-title"><span>${title}</span><button class="toast-close">×</button></div><div class="toast-body">${currentAsset?.display_name || ''} · ${currentTF}<br>Precio: ${d.p1.price.toFixed(decimals)} → ${d.p2.price.toFixed(decimals)}<br>RSI: ${d.p1.rsi.toFixed(1)} → ${d.p2.rsi.toFixed(1)}${divergenceAlertActive ? '<br><em style="color:var(--text-dim);">WhatsApp enviado por el notifier</em>' : ''}</div>`;
+  c.appendChild(t);
+  t.querySelector('.toast-close').onclick = () => { t.classList.add('fading'); setTimeout(()=>t.remove(),300); };
+  setTimeout(()=>{ t.classList.add('fading'); setTimeout(()=>t.remove(),300); }, 14000);
+}
+
+async function saveDivergenceToDb(d) {
+  if (!sb || !currentAsset) return;
+  try {
+    await sb.from('detected_divergences').upsert({
+      user_id: currentUser.id,
+      symbol: currentAsset.symbol,
+      timeframe: currentTF,
+      rsi_period: rsiPeriod,
+      divergence_type: d.type,
+      pivot1_time: d.p1.time,
+      pivot1_price: d.p1.price,
+      pivot1_rsi: d.p1.rsi,
+      pivot2_time: d.p2.time,
+      pivot2_price: d.p2.price,
+      pivot2_rsi: d.p2.rsi,
+      notified: false,
+    }, { onConflict: 'user_id,symbol,timeframe,rsi_period,divergence_type,pivot2_time', ignoreDuplicates: true });
+  } catch (e) { console.error('saveDivergence:', e); }
+}
+
+async function toggleDivergenceAlert() {
+  divergenceAlertActive = !divergenceAlertActive;
+  document.getElementById('div-alert-toggle').classList.toggle('on');
+  if (!sb || !currentAsset) return;
+  try {
+    if (divergenceAlertActive) {
+      await sb.from('divergence_alerts').upsert({
+        user_id: currentUser.id,
+        symbol: currentAsset.symbol,
+        timeframe: currentTF,
+        rsi_period: rsiPeriod,
+        active: true,
+      }, { onConflict: 'user_id,symbol,timeframe,rsi_period' });
+    } else {
+      await sb.from('divergence_alerts').delete()
+        .eq('symbol', currentAsset.symbol)
+        .eq('timeframe', currentTF)
+        .eq('rsi_period', rsiPeriod);
+    }
+  } catch (e) { console.error('toggleDiv:', e); }
+}
+
+async function loadDivergenceAlertState() {
+  if (!sb || !currentAsset) return;
+  try {
+    const { data } = await sb.from('divergence_alerts').select('*')
+      .eq('symbol', currentAsset.symbol)
+      .eq('timeframe', currentTF)
+      .eq('rsi_period', rsiPeriod)
+      .eq('active', true)
+      .maybeSingle();
+    divergenceAlertActive = !!data;
+  } catch { divergenceAlertActive = false; }
+}
 
 // ============================================================
 // CANALES AUTOMÁTICOS (alcistas / bajistas)
