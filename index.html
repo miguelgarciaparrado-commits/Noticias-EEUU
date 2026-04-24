@@ -231,7 +231,7 @@
 </head>
 <body>
 
-<div class="auth-screen" id="auth-screen">
+<div class="auth-screen" id="auth-screen" style="display:none !important;">
   <div class="auth-card">
     <div class="auth-brand">
       <div class="auth-brand-mark">📊</div>
@@ -244,12 +244,12 @@
     <div class="auth-error" id="auth-error"></div>
     <div class="auth-info" id="auth-info"></div>
     <div class="form-group"><label class="form-label">Email</label><input type="email" class="form-input" id="auth-email" autocomplete="email"></div>
-    <div class="form-group"><label class="form-label">Contraseña</label><input type="password" class="form-input" id="auth-password" autocomplete="current-password"><div class="form-hint" id="auth-pw-hint" style="display:none;">Mínimo 6 caracteres.</div></div>
+    <div class="form-group"><label class="form-label">Contraseña</label><input type="password" class="form-input" id="auth-password" autocomplete="current-password"></div>
     <button class="btn btn-primary btn-full" id="auth-submit">Entrar</button>
   </div>
 </div>
 
-<div class="app" id="app-shell" style="display:none;">
+<div class="app" id="app-shell">
   <header>
     <div class="brand"><div class="brand-mark">📊</div><div><div class="brand-name">Pattern Scanner <span id="symbol-label">—</span></div></div></div>
     <div class="ticker">
@@ -271,10 +271,7 @@
         <button class="tf-btn" data-tf="1w">1W</button>
       </div>
       <button class="icon-btn" id="btn-profile" title="Perfil">👤</button>
-      <div class="user-menu" id="user-menu">
-        <div class="user-avatar" id="user-avatar">?</div>
-        <span class="user-email" id="user-email-text">—</span>
-      </div>
+
     </div>
   </header>
   <div class="main">
@@ -304,9 +301,11 @@
       <div class="form-group"><label class="form-label">Teléfono WhatsApp</label><input type="text" class="form-input" id="prof-phone" placeholder="34612345678"><div class="form-hint">Formato internacional sin +, sin espacios.</div></div>
       <div class="form-group"><label class="form-label">CallMeBot API Key</label><input type="password" class="form-input" id="prof-apikey" placeholder="1234567"><div class="form-hint">Vacío = usa el APIKEY por defecto del repo.</div></div>
       <div class="form-group"><label class="form-label">TwelveData API Key (acciones e índices)</label><input type="password" class="form-input" id="prof-td-key" placeholder="abcdef1234..."><div class="form-hint">Gratis en <a href="https://twelvedata.com" target="_blank">twelvedata.com</a>. Necesaria para ver NASDAQ, SPX, AAPL, etc.</div></div>
+
+      
     </div>
     <div class="modal-footer">
-      <button class="btn btn-ghost" id="btn-logout">Cerrar sesión</button>
+      
       <button class="btn btn-primary" id="btn-profile-save">Guardar</button>
     </div>
   </div>
@@ -448,19 +447,10 @@ function initSupabaseClient() {
   }
 }
 
-async function checkSession() {
-  const { data: { session } } = await sb.auth.getSession();
-  if (session?.user) { currentUser = session.user; await onSignedIn(); }
-  else showAuthScreen();
-  sb.auth.onAuthStateChange((e) => { if (e === 'SIGNED_OUT') location.reload(); });
-}
-function showAuthScreen() { document.getElementById('auth-screen').style.display = 'grid'; document.getElementById('app-shell').style.display = 'none'; }
-function hideAuthScreen() { document.getElementById('auth-screen').style.display = 'none'; document.getElementById('app-shell').style.display = 'grid'; }
-
-async function onSignedIn() {
-  hideAuthScreen();
-  document.getElementById('user-email-text').textContent = currentUser.email;
-  document.getElementById('user-avatar').textContent = currentUser.email[0].toUpperCase();
+async function startAppNoAuth() {
+  // Usuario fijo compartido (sin login)
+  const SHARED_USER_ID = '00000000-0000-0000-0000-000000000001';
+  currentUser = { id: SHARED_USER_ID, email: 'compartido@local' };
   await loadProfile();
   await loadAssets();
   restoreUIState();
@@ -471,6 +461,10 @@ async function onSignedIn() {
   await loadData();
   updateTimer = setInterval(loadData, 30000);
 }
+function showAuthScreen() { document.getElementById('auth-screen').style.display = 'grid'; document.getElementById('app-shell').style.display = 'none'; }
+function hideAuthScreen() { document.getElementById('auth-screen').style.display = 'none'; document.getElementById('app-shell').style.display = 'grid'; }
+
+async function onSignedIn() { /* no-op: app sin auth */ }
 
 async function loadProfile() {
   const { data } = await sb.from('profiles').select('*').eq('user_id', currentUser.id).maybeSingle();
@@ -900,8 +894,8 @@ function setupUI() {
     if (error) alert('Error: ' + error.message);
     else { profile = { ...profile, wa_phone: phone, wa_apikey: apikey, td_api_key: tdKey }; updateWaStatus(); closeModal('modal-profile'); loadData(); }
   });
-  document.getElementById('btn-logout').addEventListener('click', async () => { if (confirm('¿Cerrar sesión?')) await sb.auth.signOut(); });
-  document.getElementById('user-menu').addEventListener('click', () => document.getElementById('btn-profile').click());
+
+
 
   document.querySelectorAll('#outcome-selector .outcome-btn').forEach(b => b.addEventListener('click', () => {
     document.querySelectorAll('#outcome-selector .outcome-btn').forEach(x => x.classList.remove('selected','pending','success','failure','invalidated'));
@@ -945,42 +939,64 @@ function restoreUIState() {
 // ============================================================
 function setupAuthScreen() {
   let mode = 'signin';
+  const showErr = (msg) => { const e = document.getElementById('auth-error'); e.textContent = msg; e.classList.add('show'); document.getElementById('auth-info').classList.remove('show'); };
+  const showInfo = (msg) => { const i = document.getElementById('auth-info'); i.textContent = msg; i.classList.add('show'); document.getElementById('auth-error').classList.remove('show'); };
+  const clearMsgs = () => { document.getElementById('auth-error').classList.remove('show'); document.getElementById('auth-info').classList.remove('show'); };
+
   document.querySelectorAll('.auth-tab').forEach(t => t.addEventListener('click', () => {
-    document.querySelectorAll('.auth-tab').forEach(x => x.classList.remove('active')); t.classList.add('active');
+    document.querySelectorAll('.auth-tab').forEach(x => x.classList.remove('active'));
+    t.classList.add('active');
     mode = t.dataset.mode;
     document.getElementById('auth-submit').textContent = mode === 'signin' ? 'Entrar' : 'Crear cuenta';
-    document.getElementById('auth-pw-hint').style.display = mode === 'signup' ? 'block' : 'none';
-    document.getElementById('auth-error').classList.remove('show'); document.getElementById('auth-info').classList.remove('show');
+    clearMsgs();
   }));
+
   document.getElementById('auth-submit').addEventListener('click', async () => {
-    if (!sb) { const e = document.getElementById('auth-error'); e.textContent = 'Cliente no inicializado. Revisa tu configuración (anon key).'; e.classList.add('show'); return; }
-    const email = document.getElementById('auth-email').value.trim(), password = document.getElementById('auth-password').value;
-    if (!email || !password) { const e = document.getElementById('auth-error'); e.textContent = 'Email y contraseña obligatorios'; e.classList.add('show'); return; }
-    if (mode === 'signup' && password.length < 6) { const e = document.getElementById('auth-error'); e.textContent = 'Contraseña mínimo 6 caracteres'; e.classList.add('show'); return; }
-    document.getElementById('auth-error').classList.remove('show'); document.getElementById('auth-info').classList.remove('show');
+    if (!sb) { showErr('Cliente no inicializado.'); return; }
+    const email = document.getElementById('auth-email').value.trim();
+    const password = document.getElementById('auth-password').value;
+    if (!email || !password) { showErr('Email y contraseña obligatorios'); return; }
+    if (mode === 'signup' && password.length < 6) { showErr('Contraseña mínimo 6 caracteres'); return; }
+    clearMsgs();
     const btn = document.getElementById('auth-submit'); btn.disabled = true; const orig = btn.textContent; btn.textContent = '…';
     try {
       if (mode === 'signup') {
-        const { data, error } = await sb.auth.signUp({ email, password });
+        // Llamar a la Edge Function
+        const signupUrl = SUPABASE_URL + '/functions/v1/signup';
+        const resp = await fetch(signupUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + SUPABASE_ANON_KEY },
+          body: JSON.stringify({ email, password }),
+        });
+        const result = await resp.json();
+        if (!resp.ok || result.error) throw new Error(result.error || 'Error al crear cuenta');
+        // Login automático tras registro
+        showInfo('Cuenta creada. Entrando...');
+        const { data, error } = await sb.auth.signInWithPassword({ email, password });
         if (error) throw error;
-        if (data?.user && !data?.session) { const i = document.getElementById('auth-info'); i.textContent = 'Cuenta creada. Revisa email para confirmar, luego entra.'; i.classList.add('show'); }
-        else if (data?.session) { currentUser = data.user; await onSignedIn(); }
+        currentUser = data.user;
+        await onSignedIn();
       } else {
         const { data, error } = await sb.auth.signInWithPassword({ email, password });
         if (error) throw error;
-        currentUser = data.user; await onSignedIn();
+        currentUser = data.user;
+        await onSignedIn();
       }
-    } catch (e) { const er = document.getElementById('auth-error'); er.textContent = e.message; er.classList.add('show'); }
-    finally { btn.disabled = false; btn.textContent = orig; }
+    } catch (e) {
+      let msg = e.message || 'Error';
+      if (mode === 'signin' && msg.toLowerCase().includes('invalid')) msg = 'Email o contraseña incorrectos';
+      showErr(msg);
+    } finally { btn.disabled = false; btn.textContent = orig; }
   });
+
   document.getElementById('auth-password').addEventListener('keydown', e => { if (e.key === 'Enter') document.getElementById('auth-submit').click(); });
+  document.getElementById('auth-email').addEventListener('keydown', e => { if (e.key === 'Enter') document.getElementById('auth-password').focus(); });
 }
 
 // ============================================================
 window.addEventListener('DOMContentLoaded', async () => {
-  setupAuthScreen();
   if (!initSupabaseClient()) return;
-  await checkSession();
+  await startAppNoAuth();
 });
 window.addEventListener('resize', resizeFVGCanvas);
 </script>
