@@ -116,65 +116,75 @@ def send_whatsapp(phone, apikey, message):
 # ============================================================
 import numpy as np
 
-def find_pivots(df, rsi_series, left=3, right=3):
-    """Encuentra pivots altos y bajos tanto en precio como en RSI (combinados)."""
+def find_pivots(df, rsi_series, left=5, right=5):
+    """Pivots combinados en precio y RSI con ventana left/right."""
     high_pivots, low_pivots = [], []
     n = len(df)
     rsi_aligned = rsi_series.reindex(df.index)
     for i in range(left, n - right):
-        is_high, is_low = True, True
+        rsi_i = rsi_aligned.iloc[i]
+        if np.isnan(rsi_i):
+            continue
+        is_high = True
+        is_low = True
         for j in range(i - left, i + right + 1):
             if j == i:
                 continue
-            if df['High'].iloc[j] >= df['High'].iloc[i]:
+            other_rsi = rsi_aligned.iloc[j]
+            if np.isnan(other_rsi):
+                is_high = False; is_low = False; break
+            if df['High'].iloc[j] > df['High'].iloc[i] or other_rsi > rsi_i:
                 is_high = False
-            if df['Low'].iloc[j] <= df['Low'].iloc[i]:
+            if df['Low'].iloc[j] < df['Low'].iloc[i] or other_rsi < rsi_i:
                 is_low = False
         ts = int(df.index[i].timestamp())
-        if is_high and not np.isnan(rsi_aligned.iloc[i]):
-            high_pivots.append({
-                'idx': i, 'time': ts,
-                'price': float(df['High'].iloc[i]),
-                'rsi': float(rsi_aligned.iloc[i]),
-            })
-        if is_low and not np.isnan(rsi_aligned.iloc[i]):
-            low_pivots.append({
-                'idx': i, 'time': ts,
-                'price': float(df['Low'].iloc[i]),
-                'rsi': float(rsi_aligned.iloc[i]),
-            })
+        if is_high:
+            high_pivots.append({'idx': i, 'time': ts, 'price': float(df['High'].iloc[i]), 'rsi': float(rsi_i)})
+        if is_low:
+            low_pivots.append({'idx': i, 'time': ts, 'price': float(df['Low'].iloc[i]), 'rsi': float(rsi_i)})
     return high_pivots, low_pivots
 
 
 def detect_divergences(df, rsi_series):
-    """Detecta divergencias regulares alcistas/bajistas."""
-    high_pivots, low_pivots = find_pivots(df, rsi_series, 3, 3)
+    """Detecta divergencias (regulares y ocultas) entre pivots CONSECUTIVOS."""
+    MIN_BETWEEN = 5
+    MAX_BETWEEN = 60
+    MIN_PRICE_DIFF = 0.003
+    MIN_RSI_DIFF = 3
+    REQUIRE_ZONE = True
+
+    high_pivots, low_pivots = find_pivots(df, rsi_series, 5, 5)
     results = []
-    # Bajistas: precio HH + RSI LH
+
+    # Bajistas (sobre pivots altos consecutivos)
     for i in range(1, len(high_pivots)):
-        for j in range(i):
-            p1, p2 = high_pivots[j], high_pivots[i]
-            if p2['idx'] - p1['idx'] < 5 or p2['idx'] - p1['idx'] > 50:
-                continue
-            if p2['price'] > p1['price'] * 1.001 and p2['rsi'] < p1['rsi'] - 1:
-                if p1['rsi'] > 50 or p2['rsi'] > 50:
-                    results.append({'type': 'bear', 'p1': p1, 'p2': p2})
-    # Alcistas: precio LL + RSI HL
+        p1, p2 = high_pivots[i-1], high_pivots[i]
+        dist = p2['idx'] - p1['idx']
+        if dist < MIN_BETWEEN or dist > MAX_BETWEEN:
+            continue
+        price_diff = (p2['price'] - p1['price']) / p1['price']
+        rsi_diff = p1['rsi'] - p2['rsi']
+        if price_diff > MIN_PRICE_DIFF and rsi_diff > MIN_RSI_DIFF:
+            if not REQUIRE_ZONE or p1['rsi'] > 55 or p2['rsi'] > 55:
+                results.append({'type': 'bear', 'p1': p1, 'p2': p2})
+        elif price_diff < -MIN_PRICE_DIFF and rsi_diff < -MIN_RSI_DIFF:
+            results.append({'type': 'hidden_bear', 'p1': p1, 'p2': p2})
+
+    # Alcistas (sobre pivots bajos consecutivos)
     for i in range(1, len(low_pivots)):
-        for j in range(i):
-            p1, p2 = low_pivots[j], low_pivots[i]
-            if p2['idx'] - p1['idx'] < 5 or p2['idx'] - p1['idx'] > 50:
-                continue
-            if p2['price'] < p1['price'] * 0.999 and p2['rsi'] > p1['rsi'] + 1:
-                if p1['rsi'] < 50 or p2['rsi'] < 50:
-                    results.append({'type': 'bull', 'p1': p1, 'p2': p2})
-    # Dedup por p2
-    by_p2 = {}
-    for d in results:
-        key = f"{d['type']}-{d['p2']['idx']}"
-        if key not in by_p2 or by_p2[key]['p1']['idx'] < d['p1']['idx']:
-            by_p2[key] = d
-    return list(by_p2.values())
+        p1, p2 = low_pivots[i-1], low_pivots[i]
+        dist = p2['idx'] - p1['idx']
+        if dist < MIN_BETWEEN or dist > MAX_BETWEEN:
+            continue
+        price_diff = (p2['price'] - p1['price']) / p1['price']
+        rsi_diff = p2['rsi'] - p1['rsi']
+        if price_diff < -MIN_PRICE_DIFF and rsi_diff > MIN_RSI_DIFF:
+            if not REQUIRE_ZONE or p1['rsi'] < 45 or p2['rsi'] < 45:
+                results.append({'type': 'bull', 'p1': p1, 'p2': p2})
+        elif price_diff > MIN_PRICE_DIFF and rsi_diff < -MIN_RSI_DIFF:
+            results.append({'type': 'hidden_bull', 'p1': p1, 'p2': p2})
+
+    return results
 
 
 def process_divergence_alerts(assets_map):
@@ -243,8 +253,15 @@ def process_divergence_alerts(assets_map):
                 price_now = get_current_price(asset, d['p2']['price'])
                 decimals = asset.get('decimals') or 2
                 display = asset.get('display_name') or symbol
-                icon = '📈' if d['type'] == 'bull' else '📉'
-                type_word = 'ALCISTA' if d['type'] == 'bull' else 'BAJISTA'
+                is_bull = d['type'] in ('bull', 'hidden_bull')
+                icon = '📈' if is_bull else '📉'
+                labels = {
+                    'bull': 'ALCISTA regular',
+                    'bear': 'BAJISTA regular',
+                    'hidden_bull': 'ALCISTA oculta',
+                    'hidden_bear': 'BAJISTA oculta',
+                }
+                type_word = labels.get(d['type'], d['type'].upper())
 
                 msg = (
                     f"{icon} *Divergencia {type_word}*\n\n"

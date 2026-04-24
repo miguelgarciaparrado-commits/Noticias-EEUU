@@ -1197,104 +1197,124 @@ function setupAuthScreen() {
 // DETECCIÓN DE DIVERGENCIAS RSI
 // ============================================================
 
-// Buscar pivots (máximos/mínimos locales) con ventana "left/right"
-function findRsiPivots(left = 3, right = 3) {
+// Pivots tipo Williams: confirma después de N velas a la derecha
+// Retorna los pivots con índice relativo a rsiValues (para alinear precio+RSI)
+function findRsiPivots(left = 5, right = 5) {
   const highPivots = [], lowPivots = [];
-  // alineamos rsiValues con candles: rsiValues empieza en candle[period]
   const rsiStart = candles.length - rsiValues.length;
   for (let i = left; i < rsiValues.length - right; i++) {
     const candleIdx = i + rsiStart;
     if (candleIdx < 0 || candleIdx >= candles.length) continue;
-    const rsi = rsiValues[i].value;
     const candle = candles[candleIdx];
-    let isHighPriceAndRsi = true, isLowPriceAndRsi = true;
-    // verificar que sea pivot tanto en precio como en RSI
+    const rsi = rsiValues[i].value;
+    let isHigh = true, isLow = true;
     for (let j = i - left; j <= i + right; j++) {
       if (j === i || j < 0 || j >= rsiValues.length) continue;
-      const otherIdx = j + rsiStart;
-      if (otherIdx < 0 || otherIdx >= candles.length) continue;
-      if (candles[otherIdx].high >= candle.high) isHighPriceAndRsi = false;
-      if (candles[otherIdx].low <= candle.low) isLowPriceAndRsi = false;
+      const otherCandle = candles[j + rsiStart];
+      const otherRsi = rsiValues[j].value;
+      // pivot alto: máximo en precio Y en RSI
+      if (otherCandle.high > candle.high || otherRsi > rsi) isHigh = false;
+      // pivot bajo: mínimo en precio Y en RSI
+      if (otherCandle.low < candle.low || otherRsi < rsi) isLow = false;
     }
-    if (isHighPriceAndRsi) highPivots.push({ rsiIdx: i, candleIdx, time: candle.time, price: candle.high, rsi });
-    if (isLowPriceAndRsi) lowPivots.push({ rsiIdx: i, candleIdx, time: candle.time, price: candle.low, rsi });
+    if (isHigh) highPivots.push({ rsiIdx: i, candleIdx, time: candle.time, price: candle.high, rsi });
+    if (isLow) lowPivots.push({ rsiIdx: i, candleIdx, time: candle.time, price: candle.low, rsi });
   }
   return { highPivots, lowPivots };
 }
 
-// Detectar divergencias regulares entre los últimos N pivots
+// Detecta divergencias SOLO entre pivots consecutivos (más limpio que comparar todos con todos)
 function detectDivergences() {
   if (rsiValues.length < 30) return [];
-  const { highPivots, lowPivots } = findRsiPivots(3, 3);
+  const { highPivots, lowPivots } = findRsiPivots(5, 5);
   const result = [];
 
-  // Buscar divergencias BAJISTAS (precio HH + RSI LH)
-  // Comparar últimos pares de pivots altos
+  // Parámetros (inspirados en los indicadores tipo LuxAlgo/TV)
+  const MIN_CANDLES_BETWEEN = 5;
+  const MAX_CANDLES_BETWEEN = 60;
+  const MIN_PRICE_DIFF_PCT = 0.003;   // 0.3%
+  const MIN_RSI_DIFF = 3;              // mínimo 3 puntos de RSI
+  const REQUIRE_ZONE = true;           // true = exigir que estén en zona (>50 para top, <50 para bot)
+
+  // BAJISTAS regulares: comparar solo pivots consecutivos de precio
   for (let i = 1; i < highPivots.length; i++) {
-    for (let j = 0; j < i; j++) {
-      const p1 = highPivots[j], p2 = highPivots[i];
-      // Distancia mínima entre pivots (evitar ruido): al menos 5 velas
-      if (p2.candleIdx - p1.candleIdx < 5) continue;
-      // Distancia máxima: 50 velas (divergencias muy largas pierden significado)
-      if (p2.candleIdx - p1.candleIdx > 50) continue;
-      // Precio más alto en p2, RSI más bajo en p2 (umbral mínimo)
-      if (p2.price > p1.price * 1.001 && p2.rsi < p1.rsi - 1) {
-        // Y que ambos RSI estén en zona relevante (>50 idealmente sobrecompra)
-        if (p1.rsi > 50 || p2.rsi > 50) {
-          result.push({ type: 'bear', p1, p2 });
-        }
+    const p1 = highPivots[i - 1], p2 = highPivots[i];
+    const dist = p2.candleIdx - p1.candleIdx;
+    if (dist < MIN_CANDLES_BETWEEN || dist > MAX_CANDLES_BETWEEN) continue;
+
+    const priceDiffPct = (p2.price - p1.price) / p1.price;
+    const rsiDiff = p1.rsi - p2.rsi;
+
+    // Divergencia bajista regular: precio HH + RSI LH
+    if (priceDiffPct > MIN_PRICE_DIFF_PCT && rsiDiff > MIN_RSI_DIFF) {
+      if (!REQUIRE_ZONE || p1.rsi > 55 || p2.rsi > 55) {
+        result.push({ type: 'bear', p1, p2 });
       }
+    }
+    // Divergencia bajista oculta: precio LH (inferior) + RSI HH (superior) - señal de continuación bajista
+    else if (priceDiffPct < -MIN_PRICE_DIFF_PCT && rsiDiff < -MIN_RSI_DIFF) {
+      result.push({ type: 'hidden_bear', p1, p2 });
     }
   }
 
-  // Divergencias ALCISTAS (precio LL + RSI HL)
+  // ALCISTAS regulares: comparar solo pivots consecutivos
   for (let i = 1; i < lowPivots.length; i++) {
-    for (let j = 0; j < i; j++) {
-      const p1 = lowPivots[j], p2 = lowPivots[i];
-      if (p2.candleIdx - p1.candleIdx < 5) continue;
-      if (p2.candleIdx - p1.candleIdx > 50) continue;
-      if (p2.price < p1.price * 0.999 && p2.rsi > p1.rsi + 1) {
-        if (p1.rsi < 50 || p2.rsi < 50) {
-          result.push({ type: 'bull', p1, p2 });
-        }
+    const p1 = lowPivots[i - 1], p2 = lowPivots[i];
+    const dist = p2.candleIdx - p1.candleIdx;
+    if (dist < MIN_CANDLES_BETWEEN || dist > MAX_CANDLES_BETWEEN) continue;
+
+    const priceDiffPct = (p2.price - p1.price) / p1.price;
+    const rsiDiff = p2.rsi - p1.rsi;
+
+    // Divergencia alcista regular: precio LL + RSI HL
+    if (priceDiffPct < -MIN_PRICE_DIFF_PCT && rsiDiff > MIN_RSI_DIFF) {
+      if (!REQUIRE_ZONE || p1.rsi < 45 || p2.rsi < 45) {
+        result.push({ type: 'bull', p1, p2 });
       }
+    }
+    // Divergencia alcista oculta: precio HL + RSI LL - continuación alcista
+    else if (priceDiffPct > MIN_PRICE_DIFF_PCT && rsiDiff < -MIN_RSI_DIFF) {
+      result.push({ type: 'hidden_bull', p1, p2 });
     }
   }
 
-  // Dedup: si hay solapamientos (mismos pivots p2), quedarnos con el más reciente
-  const uniqueByP2 = {};
-  result.forEach(d => {
-    const key = `${d.type}-${d.p2.candleIdx}`;
-    if (!uniqueByP2[key] || uniqueByP2[key].p1.candleIdx < d.p1.candleIdx) {
-      uniqueByP2[key] = d;
-    }
-  });
-  return Object.values(uniqueByP2);
+  return result;
 }
 
 function drawDivergences() {
   clearDivergenceLines();
   divergences.forEach(d => {
-    const color = d.type === 'bull' ? '#10b981' : '#ef4444';
-    // Línea en precio conectando pivots
-    const priceLine = chart.addLineSeries({ color, lineWidth: 2, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false, lineStyle: 2 });
+    // Colores: regulares más saturados, ocultos más tenues (son señales secundarias)
+    let color, lineWidth;
+    if (d.type === 'bull')           { color = '#10b981'; lineWidth = 2; }
+    else if (d.type === 'bear')      { color = '#ef4444'; lineWidth = 2; }
+    else if (d.type === 'hidden_bull') { color = 'rgba(16,185,129,0.55)'; lineWidth = 1; }
+    else                               { color = 'rgba(239,68,68,0.55)'; lineWidth = 1; }
+
+    // Línea sólida en precio conectando pivots (sólido = regular, punteado = oculto)
+    const priceLine = chart.addLineSeries({
+      color, lineWidth,
+      priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false,
+      lineStyle: d.type.startsWith('hidden') ? 2 : 0,
+    });
     priceLine.setData([
       { time: d.p1.time, value: d.p1.price },
       { time: d.p2.time, value: d.p2.price },
     ]);
     divergenceLines.push(priceLine);
-    // Línea en RSI conectando los mismos pivots (visualmente queda abajo)
-    const rsiLine = chart.addLineSeries({ priceScaleId: 'rsi', color, lineWidth: 1, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false, lineStyle: 2 });
+
+    // Línea en RSI conectando los mismos pivots
+    const rsiLine = chart.addLineSeries({
+      priceScaleId: 'rsi', color, lineWidth,
+      priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false,
+      lineStyle: d.type.startsWith('hidden') ? 2 : 0,
+    });
     rsiLine.setData([
       { time: d.p1.time, value: d.p1.rsi },
       { time: d.p2.time, value: d.p2.rsi },
     ]);
     divergenceLines.push(rsiLine);
   });
-  // Markers en el precio sobre pivot2 de cada divergencia
-  const existingMarkers = candleSeries.markers ? candleSeries.markers() : [];
-  // Los markers de patrones los mantenemos, añadimos los de divergencias
-  // Nota: setMarkers sobrescribe, así que recalculamos en drawMarkers
 }
 
 function clearDivergenceLines() {
@@ -1332,9 +1352,16 @@ async function runDivergenceDetection() {
 
 function showDivergenceToast(d) {
   const c = document.getElementById('toast-container'), t = document.createElement('div');
-  t.className = 'toast ' + (d.type === 'bull' ? 'bull' : 'bear');
-  const icon = d.type === 'bull' ? '📈' : '📉';
-  const title = `${icon} Divergencia ${d.type === 'bull' ? 'ALCISTA' : 'BAJISTA'}`;
+  const isBullish = d.type === 'bull' || d.type === 'hidden_bull';
+  t.className = 'toast ' + (isBullish ? 'bull' : 'bear');
+  const icon = isBullish ? '📈' : '📉';
+  const labels = {
+    bull: 'ALCISTA regular',
+    bear: 'BAJISTA regular',
+    hidden_bull: 'ALCISTA oculta (continuación)',
+    hidden_bear: 'BAJISTA oculta (continuación)',
+  };
+  const title = `${icon} Divergencia ${labels[d.type] || d.type}`;
   const decimals = currentAsset?.decimals ?? 2;
   t.innerHTML = `<div class="toast-title"><span>${title}</span><button class="toast-close">×</button></div><div class="toast-body">${currentAsset?.display_name || ''} · ${currentTF}<br>Precio: ${d.p1.price.toFixed(decimals)} → ${d.p2.price.toFixed(decimals)}<br>RSI: ${d.p1.rsi.toFixed(1)} → ${d.p2.rsi.toFixed(1)}${divergenceAlertActive ? '<br><em style="color:var(--text-dim);">WhatsApp enviado por el notifier</em>' : ''}</div>`;
   c.appendChild(t);
