@@ -24,7 +24,7 @@
   body { font-family: var(--font-sans); background: var(--bg); color: var(--text); font-size: 14px; line-height: 1.45; -webkit-font-smoothing: antialiased; overflow: hidden; }
   .app { display: grid; grid-template-rows: auto 1fr auto; height: 100vh; }
 
-  .auth-screen { position: fixed; inset: 0; background: var(--bg); display: grid; place-items: center; z-index: 500; padding: 20px; }
+  .auth-screen { display: none !important; }
   .auth-card { width: 100%; max-width: 400px; }
   .auth-brand { display: flex; align-items: center; gap: 12px; margin-bottom: 28px; justify-content: center; }
   .auth-brand-mark { width: 40px; height: 40px; background: var(--accent); display: grid; place-items: center; font-weight: 700; color: #000; font-size: 20px; border-radius: 6px; }
@@ -71,6 +71,9 @@
 
   .icon-btn { background: var(--surface-2); border: 1px solid var(--border); color: var(--text-muted); width: 32px; height: 32px; border-radius: 5px; cursor: pointer; font-size: 16px; display: grid; place-items: center; }
   .icon-btn:hover { color: var(--text); border-color: var(--border-strong); }
+  .icon-btn.active { background: var(--accent); color: #000; border-color: var(--accent); }
+  @keyframes spin { from { transform: rotate(0); } to { transform: rotate(360deg); } }
+  .icon-btn.spinning { animation: spin 1s linear infinite; }
 
   .main { display: grid; grid-template-columns: 1fr 340px; overflow: hidden; }
   @media (max-width: 900px) { .main { grid-template-columns: 1fr; grid-template-rows: 1fr auto; } .sidebar { max-height: 45vh; } }
@@ -224,5 +227,4 @@
   .toast.fading { opacity: 0; transform: translateX(20px); }
   @keyframes slide-in { from { opacity: 0; transform: translateX(20px); } to { opacity: 1; transform: translateX(0); } }
   .toast-title { font-size: 12px; font-weight: 600; margin-bottom: 4px; display: flex; justify-content: space-between; gap: 8px; }
-  .toast-close { background: none; border: none; color: var(--text-muted); cursor: pointer; font-size: 16px; }
-  .toast-body { font-size: 12px; color: var(--text-muted); font-family: var(--f
+  .toast-close { background: none; bord
