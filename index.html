@@ -72,6 +72,8 @@
   .icon-btn { background: var(--surface-2); border: 1px solid var(--border); color: var(--text-muted); width: 32px; height: 32px; border-radius: 5px; cursor: pointer; font-size: 16px; display: grid; place-items: center; }
   .icon-btn:hover { color: var(--text); border-color: var(--border-strong); }
   .icon-btn.active { background: var(--accent); color: #000; border-color: var(--accent); }
+  @keyframes spin { from { transform: rotate(0); } to { transform: rotate(360deg); } }
+  .icon-btn.spinning { animation: spin 1s linear infinite; }
 
   .main { display: grid; grid-template-columns: 1fr 340px; overflow: hidden; }
   @media (max-width: 900px) { .main { grid-template-columns: 1fr; grid-template-rows: 1fr auto; } .sidebar { max-height: 45vh; } }
@@ -272,6 +274,8 @@
         <button class="tf-btn active" data-tf="1d">1D</button>
         <button class="tf-btn" data-tf="1w">1W</button>
       </div>
+      <button class="icon-btn" id="btn-refresh" title="Refrescar gráfico">🔄</button>
+      <button class="icon-btn" id="btn-refresh" title="Actualizar gráfico ahora">🔄</button>
       <button class="icon-btn" id="btn-channels" title="Detectar canales automáticamente">📐</button>
       <button class="icon-btn" id="btn-draw" title="Dibujar línea (click + click)">✏️</button>
       <button class="icon-btn" id="btn-clear-lines" title="Borrar todas las líneas/canales">🗑️</button>
@@ -1024,7 +1028,8 @@ function openAlertModal(id) {
   document.getElementById('alert-title').textContent = ex ? 'Editar alerta' : 'Nueva alerta RSI';
   document.getElementById('alert-delete').style.display = ex ? 'inline-block' : 'none';
   const lvl = ex ? +ex.level : 70;
-  document.getElementById('alert-level').value = lvl; document.getElementById('alert-level-value').textContent = parseFloat(lvl).toFixed(1);
+  document.getElementById('alert-level').value = lvl;
+  document.getElementById('alert-level-value').value = parseFloat(lvl).toFixed(lvl % 1 === 0 ? 0 : 2);
   document.getElementById('alert-label').value = ex?.label || '';
   const cond = ex?.condition || 'cross_up';
   document.querySelectorAll('#modal-alert .condition-btn').forEach(b => b.classList.toggle('selected', b.dataset.value === cond));
@@ -1092,7 +1097,16 @@ function setupUI() {
     if (ok) { closeModal('modal-detail'); if (currentView === 'history') renderSidebar(); }
   });
 
-  document.getElementById('alert-level').addEventListener('input', e => document.getElementById('alert-level-value').textContent = parseFloat(e.target.value).toFixed(1));
+  // Sincronización bidireccional slider ↔ input
+  document.getElementById('alert-level').addEventListener('input', e => {
+    document.getElementById('alert-level-value').value = parseFloat(e.target.value).toFixed(1);
+  });
+  document.getElementById('alert-level-value').addEventListener('input', e => {
+    let v = parseFloat(e.target.value);
+    if (isNaN(v)) return;
+    v = Math.max(0, Math.min(100, v));
+    document.getElementById('alert-level').value = v;
+  });
   document.querySelectorAll('#modal-alert .condition-btn').forEach(b => b.addEventListener('click', () => {
     document.querySelectorAll('#modal-alert .condition-btn').forEach(x => x.classList.remove('selected'));
     b.classList.add('selected');
@@ -1100,11 +1114,38 @@ function setupUI() {
   document.getElementById('alert-save').addEventListener('click', async () => {
     const cs = document.querySelector('#modal-alert .condition-btn.selected');
     if (!cs) { alert('Selecciona condición'); return; }
-    const ok = await saveAlert({ id: editingAlertId, symbol: currentAsset.symbol, timeframe: currentTF, rsi_period: rsiPeriod, level: +document.getElementById('alert-level').value, condition: cs.dataset.value, label: document.getElementById('alert-label').value.trim() });
+    const ok = await saveAlert({ id: editingAlertId, symbol: currentAsset.symbol, timeframe: currentTF, rsi_period: rsiPeriod, level: parseFloat(document.getElementById('alert-level-value').value) || +document.getElementById('alert-level').value, condition: cs.dataset.value, label: document.getElementById('alert-label').value.trim() });
     if (ok) { closeModal('modal-alert'); renderSidebar(); renderRsiPriceLines(); }
   });
   document.getElementById('alert-delete').addEventListener('click', async () => {
     if (editingAlertId && confirm('¿Eliminar?')) { await deleteAlert(editingAlertId); closeModal('modal-alert'); renderSidebar(); renderRsiPriceLines(); }
+  });
+
+  // Botón refrescar
+  document.getElementById('btn-refresh').addEventListener('click', async () => {
+    const btn = document.getElementById('btn-refresh');
+    btn.classList.add('spinning');
+    try {
+      await loadData();
+    } finally {
+      btn.classList.remove('spinning');
+    }
+  });
+
+  // Botón refrescar
+  document.getElementById('btn-refresh').addEventListener('click', async () => {
+    const btn = document.getElementById('btn-refresh');
+    btn.classList.add('active');
+    btn.style.transition = 'transform 0.6s';
+    btn.style.transform = 'rotate(360deg)';
+    try {
+      await loadData();
+    } finally {
+      setTimeout(() => {
+        btn.classList.remove('active');
+        btn.style.transform = '';
+      }, 600);
+    }
   });
 
   // Botones de dibujo y canales
