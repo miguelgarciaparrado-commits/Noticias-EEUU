@@ -72,6 +72,23 @@ def compute_rsi(closes, period=14):
     return 100 - 100 / (1 + rs)
 
 
+
+
+def get_current_price(asset, fallback):
+    """Intenta obtener el precio en tiempo real. Si falla, devuelve fallback."""
+    try:
+        ds = asset.get('data_source')
+        if ds == 'binance':
+            sym = asset.get('binance_symbol') or asset['symbol']
+            r = requests.get(f'https://api.binance.com/api/v3/ticker/price?symbol={sym}', timeout=10)
+            if r.status_code == 200:
+                return float(r.json().get('price', fallback))
+        # TwelveData y yfinance: no hay endpoint de precio instantáneo gratuito,
+        # el fallback (cierre de la última vela) es el mejor dato disponible.
+    except Exception as e:
+        print(f'    [WARN] precio real-time falló: {e}')
+    return fallback
+
 def send_whatsapp(phone, apikey, message):
     url = 'https://api.callmebot.com/whatsapp.php'
     params = {'phone': phone, 'text': message, 'apikey': apikey}
@@ -161,13 +178,17 @@ def run():
             label = alert.get('label') or ''
             decimals = asset.get('decimals') or 2
             display = asset.get('display_name') or symbol
-            pretty_price = f'{last_price:,.{decimals}f}'
+            # Precio en tiempo real en el momento del envío
+            current_price = get_current_price(asset, last_price)
+            pretty_price = f'{current_price:,.{decimals}f}'
+            pretty_close = f'{last_price:,.{decimals}f}'
             msg = (
                 f'{icon} *Alerta RSI*\n\n'
                 f'*{display}* · {tf} · RSI({period})\n'
                 f'RSI {dir_word} {int(level)}\n'
                 f'RSI actual: *{last_rsi:.1f}*\n'
-                f'Precio: *{pretty_price}*'
+                f'Precio ahora: *{pretty_price}*\n'
+                f'Cierre vela: {pretty_close}'
             )
             if label:
                 msg += f'\n\n_{label}_'
@@ -178,7 +199,7 @@ def run():
                 try:
                     supabase.table('alert_history').insert({
                         'alert_id': alert['id'], 'rsi_value': last_rsi,
-                        'price': last_price, 'symbol': symbol, 'timeframe': tf,
+                        'price': current_price, 'symbol': symbol, 'timeframe': tf,
                     }).execute()
                     supabase.table('rsi_alerts').update({
                         'last_triggered_at': datetime.now(timezone.utc).isoformat(),
