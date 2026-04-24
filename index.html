@@ -412,13 +412,40 @@ function loadUIState() { try { return JSON.parse(localStorage.getItem(LS_UI) || 
 // AUTH
 // ============================================================
 function initSupabaseClient() {
-  if (!SUPABASE_URL.startsWith('https://') || SUPABASE_ANON_KEY.length < 30 || SUPABASE_ANON_KEY === 'PEGA_AQUI_TU_ANON_KEY') {
-    document.getElementById('auth-error').textContent = 'App no configurada. Edita el HTML y pega SUPABASE_ANON_KEY arriba en <script>.';
-    document.getElementById('auth-error').classList.add('show');
+  const authError = document.getElementById('auth-error');
+  const showErr = (msg) => { authError.textContent = msg; authError.classList.add('show'); console.error('[Scanner]', msg); };
+  try {
+    if (typeof window.supabase === 'undefined' || !window.supabase.createClient) {
+      showErr('No se pudo cargar la librería Supabase. Revisa conexión o bloqueadores.');
+      return false;
+    }
+    if (SUPABASE_ANON_KEY === 'PEGA_AQUI_TU_ANON_KEY' || !SUPABASE_ANON_KEY) {
+      showErr('Falta ANON KEY. Edita el HTML, busca SUPABASE_ANON_KEY y pega tu clave real de Supabase.');
+      return false;
+    }
+    if (!SUPABASE_URL || !SUPABASE_URL.startsWith('https://')) {
+      showErr('SUPABASE_URL inválida: ' + SUPABASE_URL);
+      return false;
+    }
+    if (SUPABASE_ANON_KEY.length < 100) {
+      showErr('ANON KEY parece incompleta (' + SUPABASE_ANON_KEY.length + ' caracteres, deberían ser ~200). ¿La has pegado entera y entre comillas simples?');
+      return false;
+    }
+    if (!SUPABASE_ANON_KEY.startsWith('eyJ')) {
+      showErr('ANON KEY no empieza por "eyJ..." — eso sugiere que no es una JWT válida. ¿Pegaste la key correcta?');
+      return false;
+    }
+    sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+    if (!sb || !sb.auth) {
+      showErr('Cliente Supabase no se creó correctamente.');
+      return false;
+    }
+    console.log('[Scanner] Supabase OK · URL:', SUPABASE_URL);
+    return true;
+  } catch (e) {
+    showErr('Error al inicializar: ' + e.message);
     return false;
   }
-  sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-  return true;
 }
 
 async function checkSession() {
@@ -926,6 +953,7 @@ function setupAuthScreen() {
     document.getElementById('auth-error').classList.remove('show'); document.getElementById('auth-info').classList.remove('show');
   }));
   document.getElementById('auth-submit').addEventListener('click', async () => {
+    if (!sb) { const e = document.getElementById('auth-error'); e.textContent = 'Cliente no inicializado. Revisa tu configuración (anon key).'; e.classList.add('show'); return; }
     const email = document.getElementById('auth-email').value.trim(), password = document.getElementById('auth-password').value;
     if (!email || !password) { const e = document.getElementById('auth-error'); e.textContent = 'Email y contraseña obligatorios'; e.classList.add('show'); return; }
     if (mode === 'signup' && password.length < 6) { const e = document.getElementById('auth-error'); e.textContent = 'Contraseña mínimo 6 caracteres'; e.classList.add('show'); return; }
