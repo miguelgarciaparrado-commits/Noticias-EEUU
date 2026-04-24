@@ -379,7 +379,7 @@ let candles = [];
 let patterns = [], historyPatterns = [], fvgs = [];
 let chart, candleSeries, rsiSeries;
 let updateTimer = null;
-let supabase = null;
+let sb = null;
 let currentUser = null;
 let profile = {};
 let rsiPeriod = 14, rsiValues = [], rsiPriceLines = [];
@@ -417,15 +417,15 @@ function initSupabaseClient() {
     document.getElementById('auth-error').classList.add('show');
     return false;
   }
-  supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+  sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
   return true;
 }
 
 async function checkSession() {
-  const { data: { session } } = await supabase.auth.getSession();
+  const { data: { session } } = await sb.auth.getSession();
   if (session?.user) { currentUser = session.user; await onSignedIn(); }
   else showAuthScreen();
-  supabase.auth.onAuthStateChange((e) => { if (e === 'SIGNED_OUT') location.reload(); });
+  sb.auth.onAuthStateChange((e) => { if (e === 'SIGNED_OUT') location.reload(); });
 }
 function showAuthScreen() { document.getElementById('auth-screen').style.display = 'grid'; document.getElementById('app-shell').style.display = 'none'; }
 function hideAuthScreen() { document.getElementById('auth-screen').style.display = 'none'; document.getElementById('app-shell').style.display = 'grid'; }
@@ -446,7 +446,7 @@ async function onSignedIn() {
 }
 
 async function loadProfile() {
-  const { data } = await supabase.from('profiles').select('*').eq('user_id', currentUser.id).maybeSingle();
+  const { data } = await sb.from('profiles').select('*').eq('user_id', currentUser.id).maybeSingle();
   profile = data || {};
   updateWaStatus();
 }
@@ -461,7 +461,7 @@ function updateWaStatus() {
 // ASSETS (catálogo dinámico)
 // ============================================================
 async function loadAssets() {
-  const { data, error } = await supabase.from('assets').select('*').eq('active', true).order('sort_order');
+  const { data, error } = await sb.from('assets').select('*').eq('active', true).order('sort_order');
   if (error || !data || data.length === 0) {
     console.error('No pude cargar assets:', error);
     assetsCatalog = [{ symbol: 'BTCUSDT', display_name: 'BTC / USDT', data_source: 'binance', binance_symbol: 'BTCUSDT', decimals: 2 }];
@@ -676,29 +676,29 @@ function runAnalysis() { patterns = detectPatterns(); fvgs = detectFVGs(); drawM
 // SYNC
 // ============================================================
 async function syncPatternsToDb() {
-  if (!supabase || patterns.length === 0 || !currentAsset) return;
+  if (!sb || patterns.length === 0 || !currentAsset) return;
   const rows = patterns.map(p => { const c = candles.find(x => x.time === p.time) || candles[candles.length-1]; return { user_id: currentUser.id, symbol: currentAsset.symbol, timeframe: currentTF, candle_time: p.time, pattern_type: p.type, pattern_name: p.name, bias: p.bias, price_at_detection: c.close }; });
-  try { await supabase.from('detected_patterns').upsert(rows, { onConflict: 'user_id,symbol,timeframe,candle_time,pattern_type', ignoreDuplicates: true }); } catch(e){ console.error(e); }
+  try { await sb.from('detected_patterns').upsert(rows, { onConflict: 'user_id,symbol,timeframe,candle_time,pattern_type', ignoreDuplicates: true }); } catch(e){ console.error(e); }
 }
 async function syncFVGsToDb() {
-  if (!supabase || fvgs.length === 0 || !currentAsset) return;
+  if (!sb || fvgs.length === 0 || !currentAsset) return;
   const rows = fvgs.map(f => ({ user_id: currentUser.id, symbol: currentAsset.symbol, timeframe: currentTF, start_time: f.startTime, fvg_type: f.type, top_price: f.top, bottom_price: f.bottom, fill_time: f.fillTime || null, filled_at: f.fillTime ? new Date(f.fillTime*1000).toISOString() : null }));
-  try { await supabase.from('tracked_fvgs').upsert(rows, { onConflict: 'user_id,symbol,timeframe,start_time,fvg_type' }); } catch(e){ console.error(e); }
+  try { await sb.from('tracked_fvgs').upsert(rows, { onConflict: 'user_id,symbol,timeframe,start_time,fvg_type' }); } catch(e){ console.error(e); }
 }
 async function loadHistoryFromDb() {
   if (!currentAsset) return { patterns: [] };
-  try { const { data } = await supabase.from('detected_patterns').select('*').eq('symbol', currentAsset.symbol).eq('timeframe', currentTF).order('candle_time',{ascending:false}).limit(500); historyPatterns = data || []; return { patterns: historyPatterns }; } catch { historyPatterns = []; return { patterns: [] }; }
+  try { const { data } = await sb.from('detected_patterns').select('*').eq('symbol', currentAsset.symbol).eq('timeframe', currentTF).order('candle_time',{ascending:false}).limit(500); historyPatterns = data || []; return { patterns: historyPatterns }; } catch { historyPatterns = []; return { patterns: [] }; }
 }
-async function updatePatternOutcome(id, outcome, notes) { try { const { error } = await supabase.from('detected_patterns').update({ outcome, notes, reviewed_at: new Date().toISOString() }).eq('id', id); return !error; } catch { return false; } }
-async function loadAlerts() { try { const { data } = await supabase.from('rsi_alerts').select('*').order('created_at',{ascending:false}); alerts = data || []; } catch { alerts = []; } }
+async function updatePatternOutcome(id, outcome, notes) { try { const { error } = await sb.from('detected_patterns').update({ outcome, notes, reviewed_at: new Date().toISOString() }).eq('id', id); return !error; } catch { return false; } }
+async function loadAlerts() { try { const { data } = await sb.from('rsi_alerts').select('*').order('created_at',{ascending:false}); alerts = data || []; } catch { alerts = []; } }
 async function saveAlert(d) {
   try {
-    if (d.id) { await supabase.from('rsi_alerts').update({ level: d.level, condition: d.condition, label: d.label, rsi_period: d.rsi_period, active: true }).eq('id', d.id); }
-    else { await supabase.from('rsi_alerts').insert({ user_id: currentUser.id, symbol: d.symbol, timeframe: d.timeframe, rsi_period: d.rsi_period, level: d.level, condition: d.condition, label: d.label, active: true }); }
+    if (d.id) { await sb.from('rsi_alerts').update({ level: d.level, condition: d.condition, label: d.label, rsi_period: d.rsi_period, active: true }).eq('id', d.id); }
+    else { await sb.from('rsi_alerts').insert({ user_id: currentUser.id, symbol: d.symbol, timeframe: d.timeframe, rsi_period: d.rsi_period, level: d.level, condition: d.condition, label: d.label, active: true }); }
     await loadAlerts(); return true;
   } catch (e) { alert('Error: ' + e.message); return false; }
 }
-async function deleteAlert(id) { try { await supabase.from('rsi_alerts').delete().eq('id', id); alerts = alerts.filter(a => a.id !== id); return true; } catch { return false; } }
+async function deleteAlert(id) { try { await sb.from('rsi_alerts').delete().eq('id', id); alerts = alerts.filter(a => a.id !== id); return true; } catch { return false; } }
 
 // ============================================================
 // ALERTS
@@ -869,11 +869,11 @@ function setupUI() {
     const phone = document.getElementById('prof-phone').value.trim().replace(/\D/g,'');
     const apikey = document.getElementById('prof-apikey').value.trim();
     const tdKey = document.getElementById('prof-td-key').value.trim();
-    const { error } = await supabase.from('profiles').upsert({ user_id: currentUser.id, wa_phone: phone, wa_apikey: apikey, td_api_key: tdKey, updated_at: new Date().toISOString() });
+    const { error } = await sb.from('profiles').upsert({ user_id: currentUser.id, wa_phone: phone, wa_apikey: apikey, td_api_key: tdKey, updated_at: new Date().toISOString() });
     if (error) alert('Error: ' + error.message);
     else { profile = { ...profile, wa_phone: phone, wa_apikey: apikey, td_api_key: tdKey }; updateWaStatus(); closeModal('modal-profile'); loadData(); }
   });
-  document.getElementById('btn-logout').addEventListener('click', async () => { if (confirm('¿Cerrar sesión?')) await supabase.auth.signOut(); });
+  document.getElementById('btn-logout').addEventListener('click', async () => { if (confirm('¿Cerrar sesión?')) await sb.auth.signOut(); });
   document.getElementById('user-menu').addEventListener('click', () => document.getElementById('btn-profile').click());
 
   document.querySelectorAll('#outcome-selector .outcome-btn').forEach(b => b.addEventListener('click', () => {
@@ -933,12 +933,12 @@ function setupAuthScreen() {
     const btn = document.getElementById('auth-submit'); btn.disabled = true; const orig = btn.textContent; btn.textContent = '…';
     try {
       if (mode === 'signup') {
-        const { data, error } = await supabase.auth.signUp({ email, password });
+        const { data, error } = await sb.auth.signUp({ email, password });
         if (error) throw error;
         if (data?.user && !data?.session) { const i = document.getElementById('auth-info'); i.textContent = 'Cuenta creada. Revisa email para confirmar, luego entra.'; i.classList.add('show'); }
         else if (data?.session) { currentUser = data.user; await onSignedIn(); }
       } else {
-        const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+        const { data, error } = await sb.auth.signInWithPassword({ email, password });
         if (error) throw error;
         currentUser = data.user; await onSignedIn();
       }
