@@ -2,7 +2,10 @@
 <html lang="es">
 <head>
 <meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+<meta http-equiv="Pragma" content="no-cache" />
+<meta http-equiv="Expires" content="0" />
 <title>Pattern Scanner</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -22,21 +25,11 @@
   }
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body { font-family: var(--font-sans); background: var(--bg); color: var(--text); font-size: 14px; line-height: 1.45; -webkit-font-smoothing: antialiased; overflow: hidden; }
-  .app { display: grid; grid-template-rows: auto 1fr auto; height: 100vh; }
-
-  .auth-screen { position: fixed; inset: 0; background: var(--bg); display: grid; place-items: center; z-index: 500; padding: 20px; }
-  .auth-card { width: 100%; max-width: 400px; }
-  .auth-brand { display: flex; align-items: center; gap: 12px; margin-bottom: 28px; justify-content: center; }
-  .auth-brand-mark { width: 40px; height: 40px; background: var(--accent); display: grid; place-items: center; font-weight: 700; color: #000; font-size: 20px; border-radius: 6px; }
-  .auth-title { font-size: 20px; font-weight: 600; }
-  .auth-subtitle { color: var(--text-muted); font-size: 12px; margin-top: 2px; }
-  .auth-tabs { display: flex; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; background: var(--surface-2); margin-bottom: 20px; }
-  .auth-tab { flex: 1; padding: 10px; background: transparent; color: var(--text-muted); border: none; cursor: pointer; font-size: 13px; border-right: 1px solid var(--border); }
-  .auth-tab:last-child { border-right: none; }
-  .auth-tab.active { background: var(--accent); color: #000; font-weight: 600; }
-  .auth-error, .auth-info { padding: 10px 12px; border-radius: 5px; font-size: 12px; margin-bottom: 14px; display: none; }
-  .auth-error { background: var(--bear-faint); border: 1px solid var(--bear-line); color: var(--bear); }
-  .auth-info { background: rgba(16,185,129,.08); border: 1px solid var(--bull-line); color: var(--bull); }
+  .app { display: grid; grid-template-rows: auto 1fr auto; height: 100vh; overflow: hidden; }
+  @media (max-width: 900px) {
+    .app { grid-template-rows: auto 1fr auto; height: 100vh; overflow-y: auto; }
+  }
+  .auth-error,
   .auth-error.show, .auth-info.show { display: block; }
 
   header { display: flex; align-items: center; justify-content: space-between; padding: 12px 18px; background: var(--surface); border-bottom: 1px solid var(--border); gap: 14px; flex-wrap: wrap; }
@@ -76,7 +69,60 @@
   .icon-btn.spinning { animation: spin 1s linear infinite; }
 
   .main { display: grid; grid-template-columns: 1fr 340px; overflow: hidden; }
-  @media (max-width: 900px) { .main { grid-template-columns: 1fr; grid-template-rows: 1fr auto; } .sidebar { max-height: 45vh; } }
+  @media (max-width: 900px) {
+    /* App completa: scroll vertical natural */
+    body { overflow: auto; }
+    .app { display: flex !important; flex-direction: column; height: auto !important; min-height: 100vh; overflow: visible !important; }
+    .main { display: flex !important; flex-direction: column; grid-template-columns: none !important; grid-template-rows: none !important; overflow: visible !important; height: auto !important; }
+    /* Chart bien grande */
+    .chart-area { height: 70vh !important; min-height: 500px !important; flex-shrink: 0; position: relative; }
+    #chart { height: 100% !important; width: 100% !important; }
+    /* Sidebar debajo, sin altura fija, scroll en la página */
+    .sidebar { max-height: none !important; height: auto !important; overflow: visible !important; padding: 12px; gap: 10px; flex-shrink: 0; }
+    .panel { padding: 10px; }
+    /* Header compacto en dos filas */
+    header { padding: 6px 10px; gap: 6px; flex-wrap: wrap; flex-shrink: 0; }
+    .brand { font-size: 13px; }
+    .brand-mark { font-size: 16px; }
+    .price-display { font-size: 16px; }
+    .price-change { font-size: 11px; padding: 2px 6px; }
+    .icon-btn { width: 34px; height: 34px; font-size: 14px; }
+    .selector { padding: 5px 8px; font-size: 12px; }
+    .timeframe-btn { padding: 4px 7px; font-size: 11px; min-width: 32px; }
+    .status-bar { font-size: 10px; padding: 4px 8px; flex-wrap: wrap; gap: 6px; flex-shrink: 0; }
+    /* Modal a pantalla casi completa */
+    .modal { max-width: 95vw; max-height: 90vh; }
+    .modal-body { padding: 12px; max-height: 65vh; overflow-y: auto; }
+    /* Toolbar dibujo: horizontal abajo del chart */
+    .draw-toolbar { 
+      top: auto !important; 
+      bottom: 80px !important; 
+      left: 50% !important; 
+      right: auto !important;
+      transform: translateX(-50%);
+      flex-direction: row !important; 
+      padding: 8px !important; 
+      z-index: 100 !important;
+      background: rgba(17,17,20,0.96) !important;
+      border: 2px solid var(--accent) !important;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.6) !important;
+      flex-wrap: wrap;
+      max-width: 90vw;
+    }
+    .draw-toolbar.open { display: flex !important; }
+    .tool-btn { width: 38px !important; height: 38px !important; font-size: 16px !important; }
+    .tool-divider { width: 1px !important; height: auto !important; margin: 4px 6px !important; align-self: stretch; }
+    .color-picker { padding: 0 4px; gap: 4px; }
+    .color-dot { width: 22px !important; height: 22px !important; }
+  }
+  @media (max-width: 480px) {
+    .chart-area { height: 65vh !important; min-height: 420px !important; }
+    .icon-btn { width: 32px; height: 32px; font-size: 13px; }
+    .timeframe-btn { padding: 3px 5px; font-size: 10px; min-width: 28px; }
+    #btn-fullscreen { display: none; }
+    .brand { font-size: 12px; }
+    .price-display { font-size: 15px; }
+  }
 
   .chart-area { position: relative; background: var(--bg); border-right: 1px solid var(--border); min-height: 0; }
   #chart { width: 100%; height: 100%; }
@@ -403,24 +449,42 @@
 </style>
 </head>
 <body>
+<!-- VERSION 2026-04-25 SIN LOGIN -->
 
-<div class="auth-screen" id="auth-screen" style="display:none !important;">
-  <div class="auth-card">
-    <div class="auth-brand">
-      <div class="auth-brand-mark">📊</div>
-      <div><div class="auth-title">Pattern Scanner</div><div class="auth-subtitle">Crypto · Acciones · Alertas RSI por WhatsApp</div></div>
-    </div>
-    <div class="auth-tabs">
-      <button class="auth-tab active" data-mode="signin">Entrar</button>
-      <button class="auth-tab" data-mode="signup">Crear cuenta</button>
-    </div>
-    <div class="auth-error" id="auth-error"></div>
-    <div class="auth-info" id="auth-info"></div>
-    <div class="form-group"><label class="form-label">Email</label><input type="email" class="form-input" id="auth-email" autocomplete="email"></div>
-    <div class="form-group"><label class="form-label">Contraseña</label><input type="password" class="form-input" id="auth-password" autocomplete="current-password"></div>
-    <button class="btn btn-primary btn-full" id="auth-submit">Entrar</button>
-  </div>
+<div id="debug-panel" style="position:fixed; top:10px; left:10px; right:10px; max-width:none; background:#0a0a0b; color:#ef4444; padding:14px 18px; border:2px solid #ef4444; border-radius:6px; font-family:monospace; font-size:11px; z-index:99999; box-shadow:0 4px 16px rgba(0,0,0,0.8); word-wrap:break-word; max-height:80vh; overflow-y:auto; display:none;">
+  <div style="font-weight:bold; margin-bottom:8px; color:#fbbf24;">⚠️ Error detectado</div>
+  <div id="debug-msg"></div>
+  <div style="margin-top:10px; font-size:10px; opacity:0.7;">Pulsa para ocultar.</div>
 </div>
+<script>
+// Captura silenciosa de errores: solo muestra el panel si hay un error real
+window.addEventListener('error', function(e) {
+  if (e.message && e.message.indexOf('already been declared') !== -1) return true;
+  if (e.message && e.message.indexOf('ResizeObserver') !== -1) return true;
+  var p = document.getElementById('debug-panel');
+  var m = document.getElementById('debug-msg');
+  if (p && m) {
+    p.style.display = 'block';
+    m.innerHTML += '<div>❌ ' + (e.message || 'Unknown') + ' (línea ' + (e.lineno || '?') + ' en ' + (e.filename || '?').split('/').pop() + ')</div>';
+  }
+});
+window.addEventListener('unhandledrejection', function(e) {
+  var p = document.getElementById('debug-panel');
+  var m = document.getElementById('debug-msg');
+  if (p && m) {
+    p.style.display = 'block';
+    m.innerHTML += '<div>❌ Promesa rechazada: ' + (e.reason && e.reason.message ? e.reason.message : e.reason) + '</div>';
+  }
+});
+document.addEventListener('click', function(e) {
+  if (e.target.closest('#debug-panel')) {
+    document.getElementById('debug-panel').style.display = 'none';
+  }
+});
+</script>
+
+
+<!-- auth-screen eliminado: app sin login -->
 
 <div class="app" id="app-shell">
   <header>
@@ -677,7 +741,11 @@
         </div>
       </div>
       <div class="form-group"><label class="form-label">Nivel RSI</label>
-        <div class="slider-wrap"><input type="range" id="alert-level" min="0" max="100" value="70" step="0.5"><span class="slider-value" id="alert-level-value">70</span></div>
+        <div class="slider-wrap" style="display:flex; gap:10px; align-items:center;">
+          <input type="range" id="alert-level" min="0" max="100" value="70" step="0.1" style="flex:1;">
+          <input type="number" id="alert-level-value" min="0" max="100" step="0.1" value="70" inputmode="decimal" style="width:80px; background:var(--surface-3); border:1px solid var(--border); border-radius:4px; padding:6px 8px; color:var(--rsi); font-family:var(--font-mono); font-size:15px; font-weight:600; text-align:center;">
+        </div>
+        <div class="form-hint">Mueve el slider o escribe el valor exacto que quieras (ej. 68.7)</div>
       </div>
       <div class="form-group"><label class="form-label">Etiqueta (opcional)</label><input type="text" class="form-input" id="alert-label" placeholder="p.ej. Sobrecompra, short"></div>
       <div class="form-group"><label class="form-label">Aplica a</label><div style="font-size:12px; color:var(--text-muted); font-family:var(--font-mono);"><span id="alert-context">—</span></div></div>
@@ -691,7 +759,8 @@
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.39.7/dist/umd/supabase.js"></script>
+
 <script>
 // ============================================================
 // CONFIG SUPABASE — PEGA TU ANON KEY ABAJO (línea 2)
@@ -842,8 +911,8 @@ async function startAppNoAuth() {
   renderPriceAlertLines();
   updateTimer = setInterval(loadData, 30000);
 }
-function showAuthScreen() { document.getElementById('auth-screen').style.display = 'grid'; document.getElementById('app-shell').style.display = 'none'; }
-function hideAuthScreen() { document.getElementById('auth-screen').style.display = 'none'; document.getElementById('app-shell').style.display = 'grid'; }
+function showAuthScreen() { /* deshabilitado: app sin login */ }
+function hideAuthScreen() { /* deshabilitado: app sin login */ }
 
 async function onSignedIn() { /* no-op: app sin auth */ }
 
@@ -1263,34 +1332,51 @@ function detectPatterns() {
         lw(c1) < b1 * 0.3 && lw(c2) < b2 * 0.3)
       r.push({ time: c2.time, startTime: c0.time, candleCount: 3, type: 'threeBlack', ...PATTERN_CONFIG.threeBlack });
 
-    // Tres adentro arriba: Harami alcista + vela alcista de confirmación
-    if (PATTERN_CONFIG.threeInsideUp.on && tr === 'down' &&
-        iS(c0) && isBigBody(c0, 0.7) &&
+    // ===== Three Inside Up (Tres adentro arriba) =====
+    // Día 1: vela bajista de cuerpo grande
+    // Día 2: vela alcista pequeña dentro del cuerpo de la 1 (Harami alcista)
+    // Día 3: vela alcista que cierra por encima del cierre del día 2 (confirmación)
+    if (PATTERN_CONFIG.threeInsideUp.on &&
+        tr !== 'up' &&
+        iS(c0) && isBigBody(c0, 0.6) &&
         iB(c1) && bodyInside(c1, c0) &&
-        iB(c2) && c2.close > c0.open)       // confirmación: supera la apertura de c0
+        iB(c2) && c2.close > c1.close)      // confirmación: rompe el cierre de la vela 2 al alza
       r.push({ time: c2.time, startTime: c0.time, candleCount: 3, type: 'threeInsideUp', ...PATTERN_CONFIG.threeInsideUp });
 
-    // Tres adentro abajo
-    if (PATTERN_CONFIG.threeInsideDown.on && tr === 'up' &&
-        iB(c0) && isBigBody(c0, 0.7) &&
+    // ===== Three Inside Down (Tres adentro abajo) =====
+    if (PATTERN_CONFIG.threeInsideDown.on &&
+        tr !== 'down' &&
+        iB(c0) && isBigBody(c0, 0.6) &&
         iS(c1) && bodyInside(c1, c0) &&
-        iS(c2) && c2.close < c0.open)
+        iS(c2) && c2.close < c1.close)      // confirmación: rompe el cierre de la vela 2 a la baja
       r.push({ time: c2.time, startTime: c0.time, candleCount: 3, type: 'threeInsideDown', ...PATTERN_CONFIG.threeInsideDown });
 
-    // Tres afuera arriba: Envolvente alcista + vela alcista de confirmación
-    if (PATTERN_CONFIG.threeOutsideUp.on && tr === 'down' &&
-        iS(c0) && iB(c1) &&
-        c1.open < c0.close && c1.close > c0.open &&   // envolvente
-        b1 > b0 * 1.1 &&
-        iB(c2) && c2.close > c1.close)
+    // ===== Three Outside Up (Tres afuera arriba) =====
+    // Bulkowski/Nison clásico:
+    //  Día 1: vela bajista (color rojo)
+    //  Día 2: vela alcista cuyo cuerpo ENVUELVE el cuerpo del día 1 (engulfing alcista)
+    //  Día 3: vela alcista que cierra por encima del cierre del día 2 (confirmación)
+    //  Tendencia previa: bajista, pero NO requiere ser muy fuerte (puede ser solo correctiva)
+    if (PATTERN_CONFIG.threeOutsideUp.on &&
+        tr !== 'up' &&                                // no requiere downtrend fuerte, basta con que NO sea uptrend
+        iS(c0) && iB(c1) && iB(c2) &&
+        c1.open <= c0.close && c1.close >= c0.open && // engulfing del cuerpo (incluye igualdad)
+        b1 >= b0 &&                                    // cuerpo igual o mayor (sin el x1.1 estricto)
+        c2.close > c1.close)                          // vela 3 confirma rompiendo el cierre de la 2
       r.push({ time: c2.time, startTime: c0.time, candleCount: 3, type: 'threeOutsideUp', ...PATTERN_CONFIG.threeOutsideUp });
 
-    // Tres afuera abajo
-    if (PATTERN_CONFIG.threeOutsideDown.on && tr === 'up' &&
-        iB(c0) && iS(c1) &&
-        c1.open > c0.close && c1.close < c0.open &&
-        b1 > b0 * 1.1 &&
-        iS(c2) && c2.close < c1.close)
+    // ===== Three Outside Down (Tres afuera abajo) =====
+    // Bulkowski/Nison clásico:
+    //  Día 1: vela alcista (color verde)
+    //  Día 2: vela bajista cuyo cuerpo ENVUELVE el cuerpo del día 1 (engulfing bajista)
+    //  Día 3: vela bajista que cierra por debajo del cierre del día 2 (confirmación)
+    //  Tendencia previa: alcista, pero puede ser solo correctiva
+    if (PATTERN_CONFIG.threeOutsideDown.on &&
+        tr !== 'down' &&                              // no requiere uptrend fuerte, basta con que NO sea downtrend
+        iB(c0) && iS(c1) && iS(c2) &&
+        c1.open >= c0.close && c1.close <= c0.open && // engulfing bajista del cuerpo
+        b1 >= b0 &&                                   // cuerpo igual o mayor
+        c2.close < c1.close)                          // vela 3 confirma rompiendo el cierre de la 2
       r.push({ time: c2.time, startTime: c0.time, candleCount: 3, type: 'threeOutsideDown', ...PATTERN_CONFIG.threeOutsideDown });
 
     // Bebé abandonado alcista: doji central con gap a ambos lados
@@ -1816,7 +1902,7 @@ function openAlertModal(id) {
   document.getElementById('alert-delete').style.display = ex ? 'inline-block' : 'none';
   const lvl = ex ? +ex.level : 70;
   document.getElementById('alert-level').value = lvl;
-  document.getElementById('alert-level-value').value = parseFloat(lvl).toFixed(lvl % 1 === 0 ? 0 : 2);
+  document.getElementById('alert-level-value').value = parseFloat(lvl).toFixed(1);
   document.getElementById('alert-label').value = ex?.label || '';
   const cond = ex?.condition || 'cross_up';
   document.querySelectorAll('#modal-alert .condition-btn').forEach(b => b.classList.toggle('selected', b.dataset.value === cond));
@@ -1899,7 +1985,11 @@ function setupUI() {
   document.getElementById('alert-save').addEventListener('click', async () => {
     const cs = document.querySelector('#modal-alert .condition-btn.selected');
     if (!cs) { alert('Selecciona condición'); return; }
-    const ok = await saveAlert({ id: editingAlertId, symbol: currentAsset.symbol, timeframe: currentTF, rsi_period: rsiPeriod, level: parseFloat(document.getElementById('alert-level-value').value) || +document.getElementById('alert-level').value, condition: cs.dataset.value, label: document.getElementById('alert-label').value.trim() });
+    const levelInput = parseFloat(document.getElementById('alert-level-value').value);
+    const levelSlider = parseFloat(document.getElementById('alert-level').value);
+    const level = !isNaN(levelInput) ? levelInput : levelSlider;
+    if (isNaN(level) || level < 0 || level > 100) { alert('Nivel RSI inválido. Debe estar entre 0 y 100.'); return; }
+    const ok = await saveAlert({ id: editingAlertId, symbol: currentAsset.symbol, timeframe: currentTF, rsi_period: rsiPeriod, level: level, condition: cs.dataset.value, label: document.getElementById('alert-label').value.trim() });
     if (ok) { closeModal('modal-alert'); renderSidebar(); renderRsiPriceLines(); }
   });
   document.getElementById('alert-delete').addEventListener('click', async () => {
@@ -1964,61 +2054,7 @@ function restoreUIState() {
 // ============================================================
 // AUTH HANDLERS
 // ============================================================
-function setupAuthScreen() {
-  let mode = 'signin';
-  const showErr = (msg) => { const e = document.getElementById('auth-error'); e.textContent = msg; e.classList.add('show'); document.getElementById('auth-info').classList.remove('show'); };
-  const showInfo = (msg) => { const i = document.getElementById('auth-info'); i.textContent = msg; i.classList.add('show'); document.getElementById('auth-error').classList.remove('show'); };
-  const clearMsgs = () => { document.getElementById('auth-error').classList.remove('show'); document.getElementById('auth-info').classList.remove('show'); };
-
-  document.querySelectorAll('.auth-tab').forEach(t => t.addEventListener('click', () => {
-    document.querySelectorAll('.auth-tab').forEach(x => x.classList.remove('active'));
-    t.classList.add('active');
-    mode = t.dataset.mode;
-    document.getElementById('auth-submit').textContent = mode === 'signin' ? 'Entrar' : 'Crear cuenta';
-    clearMsgs();
-  }));
-
-  document.getElementById('auth-submit').addEventListener('click', async () => {
-    if (!sb) { showErr('Cliente no inicializado.'); return; }
-    const email = document.getElementById('auth-email').value.trim();
-    const password = document.getElementById('auth-password').value;
-    if (!email || !password) { showErr('Email y contraseña obligatorios'); return; }
-    if (mode === 'signup' && password.length < 6) { showErr('Contraseña mínimo 6 caracteres'); return; }
-    clearMsgs();
-    const btn = document.getElementById('auth-submit'); btn.disabled = true; const orig = btn.textContent; btn.textContent = '…';
-    try {
-      if (mode === 'signup') {
-        // Llamar a la Edge Function
-        const signupUrl = SUPABASE_URL + '/functions/v1/signup';
-        const resp = await fetch(signupUrl, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + SUPABASE_ANON_KEY },
-          body: JSON.stringify({ email, password }),
-        });
-        const result = await resp.json();
-        if (!resp.ok || result.error) throw new Error(result.error || 'Error al crear cuenta');
-        // Login automático tras registro
-        showInfo('Cuenta creada. Entrando...');
-        const { data, error } = await sb.auth.signInWithPassword({ email, password });
-        if (error) throw error;
-        currentUser = data.user;
-        await onSignedIn();
-      } else {
-        const { data, error } = await sb.auth.signInWithPassword({ email, password });
-        if (error) throw error;
-        currentUser = data.user;
-        await onSignedIn();
-      }
-    } catch (e) {
-      let msg = e.message || 'Error';
-      if (mode === 'signin' && msg.toLowerCase().includes('invalid')) msg = 'Email o contraseña incorrectos';
-      showErr(msg);
-    } finally { btn.disabled = false; btn.textContent = orig; }
-  });
-
-  document.getElementById('auth-password').addEventListener('keydown', e => { if (e.key === 'Enter') document.getElementById('auth-submit').click(); });
-  document.getElementById('auth-email').addEventListener('keydown', e => { if (e.key === 'Enter') document.getElementById('auth-password').focus(); });
-}
+// setupAuthScreen eliminado
 
 // ============================================================
 
@@ -2565,7 +2601,21 @@ function toggleDrawToolbar() {
   btn.classList.toggle('active', toolbarOpen);
   const chartEl = document.getElementById('chart');
   chartEl.style.cursor = toolbarOpen ? 'crosshair' : 'default';
-  if (!toolbarOpen) drawingPoints = [];
+  if (!toolbarOpen) {
+    drawingPoints = [];
+  } else {
+    // Mostrar toast informativo cuando se abre la toolbar (especialmente útil en móvil)
+    const c = document.getElementById('toast-container'), t = document.createElement('div');
+    t.className = 'toast';
+    const toolName = currentTool === 'trendline' ? 'Línea de tendencia (2 toques)' :
+                     currentTool === 'hline' ? 'Línea horizontal (1 toque)' :
+                     currentTool === 'rect' ? 'Rectángulo (2 toques en esquinas)' :
+                     'Fibonacci (toca high y low)';
+    t.innerHTML = `<div class="toast-title"><span>✏️ Modo dibujo activado</span><button class="toast-close">×</button></div><div class="toast-body">Herramienta: ${toolName}<br>Toca el chart para empezar a dibujar.<br><em style="color:var(--text-dim);">Pulsa ✏️ otra vez para salir.</em></div>`;
+    c.appendChild(t);
+    t.querySelector('.toast-close').onclick = () => t.remove();
+    setTimeout(() => t.remove(), 6000);
+  }
 }
 
 function selectTool(tool) {
@@ -2889,7 +2939,7 @@ function setupDrawingTools() {
   // Ya está suscrito a chart.subscribeClick(handleChartClick) — lo redirigimos
   // (handleChartClick lo dejamos como wrapper)
 
-  // Click DERECHO sobre el chart: detectar objeto y mostrar menú
+  // Click DERECHO sobre el chart: detectar objeto y mostrar menú (PC)
   const chartEl = document.getElementById('chart');
   chartEl.addEventListener('contextmenu', e => {
     const rect = chartEl.getBoundingClientRect();
@@ -2902,7 +2952,7 @@ function setupDrawingTools() {
     }
   });
 
-  // Doble click sobre objeto = mostrar menú
+  // Doble click (PC y móvil)
   chartEl.addEventListener('dblclick', e => {
     const rect = chartEl.getBoundingClientRect();
     const x = e.clientX - rect.left;
@@ -2913,6 +2963,41 @@ function setupDrawingTools() {
       showCtxMenu(e.clientX, e.clientY, obj);
     }
   });
+
+  // LONG PRESS para móvil: mantener el dedo 600ms abre menú contextual
+  let touchTimer = null;
+  let touchStart = null;
+  chartEl.addEventListener('touchstart', e => {
+    if (e.touches.length !== 1) return;
+    const t = e.touches[0];
+    const rect = chartEl.getBoundingClientRect();
+    touchStart = { x: t.clientX - rect.left, y: t.clientY - rect.top, clientX: t.clientX, clientY: t.clientY };
+    touchTimer = setTimeout(() => {
+      if (!touchStart) return;
+      const obj = findObjectNearClick(touchStart.x, touchStart.y);
+      if (obj) {
+        // Vibración pequeña como feedback
+        if (navigator.vibrate) navigator.vibrate(40);
+        showCtxMenu(touchStart.clientX, touchStart.clientY, obj);
+      }
+      touchTimer = null;
+    }, 600);
+  }, { passive: true });
+  chartEl.addEventListener('touchmove', e => {
+    if (!touchStart || !touchTimer) return;
+    const t = e.touches[0];
+    const dx = (t.clientX - chartEl.getBoundingClientRect().left) - touchStart.x;
+    const dy = (t.clientY - chartEl.getBoundingClientRect().top) - touchStart.y;
+    if (Math.hypot(dx, dy) > 10) {
+      // Movió el dedo: cancelar long press
+      clearTimeout(touchTimer);
+      touchTimer = null;
+    }
+  }, { passive: true });
+  chartEl.addEventListener('touchend', () => {
+    if (touchTimer) { clearTimeout(touchTimer); touchTimer = null; }
+    touchStart = null;
+  }, { passive: true });
 
   // Acciones del menú contextual
   document.querySelectorAll('.ctx-item').forEach(item => {
