@@ -2,12 +2,9 @@ name: Daily Economic Calendar WhatsApp
 
 on:
   schedule:
-    on:
-  schedule:
-    # Intentamos varias veces entre UTC 05:30 y 07:00 para cubrir:
-    # - Horario de verano (CEST): Madrid 07:30 - 09:00
-    # - Horario de invierno (CET): Madrid 06:30 - 08:00
-    # El script solo envía cuando la hora local sea exactamente 08:00.
+    # Múltiples ventanas L-V para que GitHub Actions no se salte el envío.
+    # El script verifica la hora local exacta (08:00 Madrid) y aborta si no.
+    # Solo te llegará UN mensaje al día, en la primera ventana que coincida.
     - cron: '30 5 * * 1-5'
     - cron: '45 5 * * 1-5'
     - cron: '0 6 * * 1-5'
@@ -20,6 +17,8 @@ on:
 jobs:
   notify:
     runs-on: ubuntu-latest
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
     steps:
       - uses: actions/checkout@v4
 
