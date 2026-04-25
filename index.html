@@ -1920,12 +1920,18 @@ function setupUI() {
   document.getElementById('asset-select').addEventListener('change', e => {
     currentAsset = assetsCatalog.find(a => a.symbol === e.target.value);
     isFirstScan = true; saveUIState();
-    // limpiar líneas del activo anterior del chart
     clearDrawingsFromChart();
     clearChannels();
     clearDivergenceLines();
     knownDivergenceKeys = new Set();
-    loadData().then(async () => { renderRsiPriceLines(); loadDrawingsFromStorage(); await loadPriceAlerts(); renderPriceAlertLines(); if (currentView === 'history') renderSidebar(); });
+    loadData().then(async () => {
+      renderRsiPriceLines();
+      loadDrawingsFromStorage();
+      await loadPriceAlerts();
+      renderPriceAlertLines();
+      await loadDivergenceAlertState();
+      renderSidebar();   // re-render para reflejar el toggle correcto
+    });
   });
   document.querySelectorAll('.tf-btn').forEach(b => b.addEventListener('click', () => {
     document.querySelectorAll('.tf-btn').forEach(x => x.classList.remove('active')); b.classList.add('active');
@@ -1934,7 +1940,14 @@ function setupUI() {
     clearChannels();
     clearDivergenceLines();
     knownDivergenceKeys = new Set();
-    loadData().then(async () => { renderRsiPriceLines(); loadDrawingsFromStorage(); await loadPriceAlerts(); renderPriceAlertLines(); if (currentView === 'history') renderSidebar(); });
+    loadData().then(async () => {
+      renderRsiPriceLines();
+      loadDrawingsFromStorage();
+      await loadPriceAlerts();
+      renderPriceAlertLines();
+      await loadDivergenceAlertState();
+      renderSidebar();   // re-render para reflejar el toggle correcto
+    });
   }));
   document.querySelectorAll('.view-btn').forEach(b => b.addEventListener('click', () => {
     document.querySelectorAll('.view-btn').forEach(x => x.classList.remove('active')); b.classList.add('active');
