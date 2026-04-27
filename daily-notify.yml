@@ -2,9 +2,6 @@ name: Daily Economic Calendar WhatsApp
 
 on:
   schedule:
-    # Múltiples ventanas L-V para que GitHub Actions no se salte el envío.
-    # El script verifica la hora local exacta (08:00 Madrid) y aborta si no.
-    # Solo te llegará UN mensaje al día, en la primera ventana que coincida.
     - cron: '30 5 * * 1-5'
     - cron: '45 5 * * 1-5'
     - cron: '0 6 * * 1-5'
