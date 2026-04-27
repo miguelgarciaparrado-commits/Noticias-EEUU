@@ -11,6 +11,10 @@ on:
     - cron: '0 7 * * 1-5'
   workflow_dispatch:
 
+concurrency:
+  group: daily-notify
+  cancel-in-progress: false
+
 jobs:
   notify:
     runs-on: ubuntu-latest
@@ -26,9 +30,25 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
+      - name: Download last_sent marker
+        uses: actions/download-artifact@v4
+        with:
+          name: last-sent-marker
+          path: .
+        continue-on-error: true
+
       - name: Send daily notification
         env:
           WA_PHONE: ${{ secrets.WA_PHONE }}
           WA_APIKEY: ${{ secrets.WA_APIKEY }}
           GITHUB_EVENT_NAME: ${{ github.event_name }}
         run: python fetch_and_notify.py
+
+      - name: Upload last_sent marker
+        if: hashFiles('last_sent.txt') != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: last-sent-marker
+          path: last_sent.txt
+          retention-days: 7
+          overwrite: true
