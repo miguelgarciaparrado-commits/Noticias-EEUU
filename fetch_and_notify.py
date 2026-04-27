@@ -3,31 +3,37 @@
 Daily Economic Calendar WhatsApp Notifier
 Fetches high-impact events from ForexFactory and sends via WhatsApp (CallMeBot).
 
-Filter logic:
-- Always include High impact (3-star) events for ALL countries.
-- Also include Medium impact events for USD (because ForexFactory often
-  rates US Flash PMIs, Unemployment Claims, etc. as Medium while Investing
-  shows them as 3-star).
+Key behaviors:
+- Send window: 07:30 - 08:30 local time (tolerates GitHub Actions cron lag).
+- Anti-duplicate: writes a marker file 'last_sent.txt' so the workflow can
+  detect "already sent today" via an artifact and skip subsequent runs.
+- Includes High impact (3-star) events for all countries plus Medium impact
+  events for USD (which Investing often shows as 3-star).
 """
 
 import os
 import sys
 from datetime import datetime
+from pathlib import Path
 from zoneinfo import ZoneInfo
 
 import requests
 
 # ---- Config ----
 LOCAL_TZ = ZoneInfo("Europe/Madrid")
-TARGET_HOUR = 8
+TARGET_HOUR = 8                # Send around 08:00 local time
+WINDOW_START_MIN = 7 * 60 + 30  # 07:30
+WINDOW_END_MIN = 8 * 60 + 30    # 08:30
 FF_URL = "https://nfs.faireconomy.media/ff_calendar_thisweek.json"
 CALLMEBOT_URL = "https://api.callmebot.com/whatsapp.php"
 WEEKDAYS_ONLY = True
 
+# Marker file used by the workflow's artifact mechanism for anti-duplicate.
+MARKER_FILE = Path("last_sent.txt")
+
 # Countries where we also include Medium impact (not just High)
 EXTRA_MEDIUM_COUNTRIES = {"USD"}
 
-# Country flag emojis
 FLAGS = {
     "USD": "🇺🇸", "EUR": "🇪🇺", "GBP": "🇬🇧", "JPY": "🇯🇵",
     "CAD": "🇨🇦", "AUD": "🇦🇺", "NZD": "🇳🇿", "CHF": "🇨🇭",
@@ -42,17 +48,45 @@ def log(msg: str) -> None:
     print(f"[{datetime.now().isoformat(timespec='seconds')}] {msg}")
 
 
+def already_sent_today() -> bool:
+    """Check the marker file to see if today's send already happened."""
+    if not MARKER_FILE.exists():
+        return False
+    try:
+        last = MARKER_FILE.read_text().strip()
+    except OSError:
+        return False
+    today_str = datetime.now(LOCAL_TZ).date().isoformat()
+    return last == today_str
+
+
+def write_marker() -> None:
+    today_str = datetime.now(LOCAL_TZ).date().isoformat()
+    MARKER_FILE.write_text(today_str)
+    log(f"Wrote marker for {today_str}")
+
+
 def should_run_now() -> bool:
+    """Decide whether to proceed with sending."""
     if os.environ.get("GITHUB_EVENT_NAME") == "workflow_dispatch":
-        log("Manual trigger — skipping time check.")
+        log("Manual trigger — skipping time/dedup checks.")
         return True
+
     now_local = datetime.now(LOCAL_TZ)
+
     if WEEKDAYS_ONLY and now_local.weekday() >= 5:
         log(f"Weekend ({WEEKDAYS_ES[now_local.weekday()]}). Skipping.")
         return False
-    if now_local.hour != TARGET_HOUR:
-        log(f"Local time is {now_local:%H:%M %Z}, not {TARGET_HOUR:02d}:00. Skipping.")
+
+    minutes = now_local.hour * 60 + now_local.minute
+    if not (WINDOW_START_MIN <= minutes <= WINDOW_END_MIN):
+        log(f"Local time {now_local:%H:%M %Z} outside window 07:30-08:30. Skipping.")
         return False
+
+    if already_sent_today():
+        log("Already sent today (marker file present). Skipping.")
+        return False
+
     return True
 
 
@@ -68,7 +102,6 @@ def fetch_events() -> list[dict]:
 
 
 def should_include(impact: str, country: str) -> bool:
-    """Return True if event matches our filter criteria."""
     if impact == "High":
         return True
     if impact == "Medium" and country in EXTRA_MEDIUM_COUNTRIES:
@@ -155,6 +188,9 @@ def main() -> int:
         print(message)
         print("---------------")
         send_whatsapp(message)
+        # Only mark as sent for scheduled runs (manual runs shouldn't block tomorrow)
+        if os.environ.get("GITHUB_EVENT_NAME") != "workflow_dispatch":
+            write_marker()
         log("Done.")
         return 0
     except Exception as exc:
