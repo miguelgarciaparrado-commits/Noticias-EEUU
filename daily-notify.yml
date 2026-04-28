@@ -15,6 +15,9 @@ concurrency:
   group: daily-notify
   cancel-in-progress: false
 
+permissions:
+  contents: write
+
 jobs:
   notify:
     runs-on: ubuntu-latest
@@ -22,6 +25,8 @@ jobs:
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
     steps:
       - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
 
       - uses: actions/setup-python@v5
         with:
@@ -30,13 +35,6 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-      - name: Download last_sent marker
-        uses: actions/download-artifact@v4
-        with:
-          name: last-sent-marker
-          path: .
-        continue-on-error: true
-
       - name: Send daily notification
         env:
           WA_PHONE: ${{ secrets.WA_PHONE }}
@@ -44,11 +42,15 @@ jobs:
           GITHUB_EVENT_NAME: ${{ github.event_name }}
         run: python fetch_and_notify.py
 
-      - name: Upload last_sent marker
+      - name: Commit marker file
         if: hashFiles('last_sent.txt') != ''
-        uses: actions/upload-artifact@v4
-        with:
-          name: last-sent-marker
-          path: last_sent.txt
-          retention-days: 7
-          overwrite: true
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add last_sent.txt
+          if ! git diff --staged --quiet; then
+            git commit -m "chore: update last_sent marker [skip ci]"
+            git push
+          else
+            echo "No changes to commit."
+          fi
