@@ -22,8 +22,8 @@ import requests
 # ---- Config ----
 LOCAL_TZ = ZoneInfo("Europe/Madrid")
 TARGET_HOUR = 8                # Send around 08:00 local time
-WINDOW_START_MIN = 7 * 60 + 30  # 07:30
-WINDOW_END_MIN = 8 * 60 + 30    # 08:30
+WINDOW_START_MIN = 7 * 60  # 07:30
+WINDOW_END_MIN = 12 * 60   # 08:30
 FF_URL = "https://nfs.faireconomy.media/ff_calendar_thisweek.json"
 CALLMEBOT_URL = "https://api.callmebot.com/whatsapp.php"
 WEEKDAYS_ONLY = True
